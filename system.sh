@@ -238,7 +238,14 @@ change_ssh_password() {
     # 生成复杂密码，包含大小写字母、数字、特殊字符
     new_pass=$(cat /dev/urandom | tr -dc 'a-zA-Z0-9!@#$%^&*()_+' | head -c 20)
     # 确保密码包含至少1个大写字母、1个小写字母、1个数字、1个特殊字符
-    while ! [[ "$new_pass" =~ [A-Z] && "$new_pass" =~ [a-z] && "$new_pass" =~ [0-9] && "$new_pass" =~ [!@#$%^&*()_+] ]]; do
+    while true; do
+        has_upper=$(echo "$new_pass" | grep -q '[A-Z]' && echo "yes" || echo "no")
+        has_lower=$(echo "$new_pass" | grep -q '[a-z]' && echo "yes" || echo "no")
+        has_digit=$(echo "$new_pass" | grep -q '[0-9]' && echo "yes" || echo "no")
+        has_special=$(echo "$new_pass" | grep -q '[!@#$%^&*()_+]' && echo "yes" || echo "no")
+        if [ "$has_upper" = "yes" ] && [ "$has_lower" = "yes" ] && [ "$has_digit" = "yes" ] && [ "$has_special" = "yes" ]; then
+            break
+        fi
         new_pass=$(cat /dev/urandom | tr -dc 'a-zA-Z0-9!@#$%^&*()_+' | head -c 20)
     done
     echo "生成的密码：$new_pass"

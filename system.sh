@@ -235,11 +235,20 @@ ssh_port_menu() {
 # 功能7：修改SSH密码 🔑
 change_ssh_password() {
     echo "生成一个20位复杂密码 🔐..."
-    new_pass=$(openssl rand -base64 15 | tr -dc 'a-zA-Z0-9!@#$%^&*()_+' | head -c 20)
+    # 生成复杂密码，包含大小写字母、数字、特殊字符
+    new_pass=$(cat /dev/urandom | tr -dc 'a-zA-Z0-9!@#$%^&*()_+' | head -c 20)
+    # 确保密码包含至少1个大写字母、1个小写字母、1个数字、1个特殊字符
+    while ! [[ "$new_pass" =~ [A-Z] && "$new_pass" =~ [a-z] && "$new_pass" =~ [0-9] && "$new_pass" =~ [!@#$%^&*()_+] ]]; do
+        new_pass=$(cat /dev/urandom | tr -dc 'a-zA-Z0-9!@#$%^&*()_+' | head -c 20)
+    done
     echo "生成的密码：$new_pass"
-    echo "警告：修改后，下次登录必须使用新密码 ❗"
+    echo "警告：修改后，仅新密码可用于登录，旧密码将失效 ❗"
+    echo "您可以直接使用以上生成的密码，或输入自定义密码。"
 
-    read -p "请输入新密码（可见）： " pass1
+    read -p "请输入新密码（可见，留空使用生成密码）： " pass1
+    if [ -z "$pass1" ]; then
+        pass1="$new_pass"
+    fi
     read -p "请再次确认新密码（可见）： " pass2
 
     if [ "$pass1" != "$pass2" ]; then
@@ -247,9 +256,17 @@ change_ssh_password() {
         return
     fi
 
-    echo "root:$pass1" | chpasswd
-    echo "SSH密码已更改，新密码为：$pass1 🎉"
-    echo "请记住：下次登录需使用此新密码 ❗"
+    # 尝试修改密码
+    if echo "root:$pass1" | chpasswd; then
+        echo "SSH密码已更改，新密码为：$pass1 🎉"
+        echo "请保存新密码，并立即测试SSH登录（ssh root@your_server -p $current_port） ❗"
+        echo "如果无法登录，请检查："
+        echo "  journalctl -xeu ssh.service"
+    else
+        echo "密码修改失败 😔 请检查："
+        echo "  journalctl -xeu ssh.service"
+        echo "您可以尝试手动修改密码：sudo passwd root"
+    fi
 }
 
 # 功能8：卸载脚本 🗑️
@@ -457,7 +474,7 @@ check_cpu_usage() {
                 fi
                 ;;
             2)
-                read -p "请输入要重启动的进程ID（PID）： " pid
+                read -p "请输入要重启的进程ID（PID）： " pid
                 if kill "$pid" && sleep 1 && command -v "$(ps -p "$pid" -o comm=)" >/dev/null; then
                     "$(ps -p "$pid" -o comm=)" &
                     echo "进程 $pid 已重启 🎉"

@@ -52,38 +52,34 @@ log_cleanup_menu() {
     done
 }
 
-# 功能3：启用BBR ⚡
-enable_bbr() {
-    # 检查是否为Debian 13
-    if grep -q "Debian GNU/Linux 13" /etc/os-release; then
-        echo "检测到Debian 13，默认支持BBR v3，正在创建/etc/sysctl.conf（如果不存在） 📝..."
-        touch /etc/sysctl.conf
-    else
-        # 检查是否支持BBR
-        if lsmod | grep -q tcp_bbr; then
-            echo "检测到BBR模块，但可能不是v3版本 🔍"
-            read -p "是否更换为BBR v3内核？（y/n）： " bbr_upgrade
-            if [ "$bbr_upgrade" = "y" ] || [ "$bbr_upgrade" = "Y" ]; then
+# 功能3：BBR管理子菜单 ⚡
+bbr_menu() {
+    while true; do
+        echo "BBR管理菜单 ⚡："
+        echo "1. 安装BBR v3 🚀"
+        echo "2. BBR调优 ⚙️"
+        echo "3. 卸载BBR 🗑️"
+        echo "4. 返回主菜单 🔙"
+        read -p "请输入您的选择： " choice
+        case $choice in
+            1)
                 echo "正在安装BBR v3内核 ⏳..."
-                echo "注意：安装完成后，请手动输入 'system-easy' 返回面板以启用BBR并调优 ❗"
+                echo "注意：安装完成后，请手动输入 'system-easy' 返回面板以继续操作 ❗"
                 bash <(curl -L -s https://raw.githubusercontent.com/byJoey/Actions-bbr-v3/refs/heads/main/install.sh)
-                echo "BBR v3安装脚本已执行，请按提示操作后返回 🚪"
+                if lsmod | grep -q tcp_bbr; then
+                    echo "BBR v3内核安装成功 🎉 请运行 'system-easy' 返回面板以调优或管理BBR。"
+                else
+                    echo "BBR v3安装失败，请检查网络或日志 😔"
+                fi
                 return
-            else
-                echo "保持当前BBR版本，继续优化配置 🔧"
-            fi
-        else
-            echo "未检测到BBR模块，正在通过外部脚本安装BBR v3 ⏳..."
-            echo "注意：安装完成后，请手动输入 'system-easy' 返回面板以启用BBR并调优 ❗"
-            bash <(curl -L -s https://raw.githubusercontent.com/byJoey/Actions-bbr-v3/refs/heads/main/install.sh)
-            echo "BBR v3安装脚本已执行，请按提示操作后返回 🚪"
-            return
-        fi
-    fi
-
-    # 应用BBR优化配置
-    echo "正在应用BBR优化配置 ⚙️..."
-    cat > /etc/sysctl.conf << EOF
+                ;;
+            2)
+                if ! lsmod | grep -q tcp_bbr; then
+                    echo "未检测到BBR模块，请先选择'1. 安装BBR v3' 😕"
+                    continue
+                fi
+                echo "正在应用BBR优化配置 ⚙️..."
+                cat > /etc/sysctl.conf << EOF
 fs.file-max = 6815744
 net.ipv4.tcp_no_metrics_save=1
 net.ipv4.tcp_ecn=0
@@ -110,9 +106,48 @@ net.ipv4.tcp_congestion_control=bbr
 net.ipv6.conf.all.forwarding=1
 net.ipv6.conf.default.forwarding=1
 EOF
-    sysctl -p && sysctl --system
-    echo "BBR已启用并优化 🎉 按回车键返回菜单。"
-    read
+                if sysctl -p && sysctl --system; then
+                    echo "BBR优化配置已应用 🎉"
+                    echo "当前TCP拥塞控制算法：$(sysctl -n net.ipv4.tcp_congestion_control)"
+                else
+                    echo "BBR优化配置应用失败，请检查 /etc/sysctl.conf 😔"
+                fi
+                echo "按回车键返回菜单 🔙"
+                read
+                ;;
+            3)
+                echo "正在卸载BBR 🗑️..."
+                if lsmod | grep -q tcp_bbr; then
+                    rmmod tcp_bbr 2>/dev/null
+                    if ! lsmod | grep -q tcp_bbr; then
+                        echo "BBR模块已移除 ✅"
+                    else
+                        echo "无法移除BBR模块，可能被内核占用 😔"
+                    fi
+                else
+                    echo "未检测到BBR模块，无需移除 ✅"
+                fi
+                # 恢复默认TCP拥塞控制
+                sed -i '/net\.core\.default_qdisc/d' /etc/sysctl.conf
+                sed -i '/net\.ipv4\.tcp_congestion_control/d' /etc/sysctl.conf
+                echo "net.ipv4.tcp_congestion_control=cubic" >> /etc/sysctl.conf
+                if sysctl -p && sysctl --system; then
+                    echo "已恢复默认TCP拥塞控制（cubic） 🎉"
+                    echo "当前TCP拥塞控制算法：$(sysctl -n net.ipv4.tcp_congestion_control)"
+                else
+                    echo "恢复默认配置失败，请检查 /etc/sysctl.conf 😔"
+                fi
+                echo "按回车键返回菜单 🔙"
+                read
+                ;;
+            4)
+                return
+                ;;
+            *)
+                echo "无效选择，请重试 😕"
+                ;;
+        esac
+    done
 }
 
 # 功能4：DNS管理子菜单 🌐
@@ -775,7 +810,7 @@ while true; do
     echo "系统维护脚本菜单 📋："
     echo "1. 安装常用工具和依赖 🛠️"
     echo "2. 日志清理管理 🗑️"
-    echo "3. 启用BBR ⚡"
+    echo "3. BBR管理 ⚡"
     echo "4. DNS管理 🌐"
     echo "5. 修改主机名 🖥️"
     echo "6. SSH端口管理 🔒"
@@ -793,7 +828,7 @@ while true; do
     case $main_choice in
         1) install_tools ;;
         2) log_cleanup_menu ;;
-        3) enable_bbr ;;
+        3) bbr_menu ;;
         4) dns_menu ;;
         5) change_hostname ;;
         6) ssh_port_menu ;;

@@ -1,5 +1,6 @@
 # System-Easy
 #### 快速管理Debian/Ubuntu系统
+### Building...
 ### 1. 安装
 ```
 curl -L https://raw.githubusercontent.com/Lanlan13-14/System-Easy/refs/heads/main/system.sh -o /tmp/system-easy && chmod +x /tmp/system-easy && sudo mv /tmp/system-easy /usr/local/bin/system-easy && system-easy

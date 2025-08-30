@@ -6,9 +6,6 @@ if [ "$(id -u)" != "0" ]; then
    exit 1
 fi
 
-# 用于存储原SSH端口的临时文件
-SSH_PORT_FILE="/tmp/original_ssh_port"
-
 # 脚本URL
 SCRIPT_URL="https://raw.githubusercontent.com/Lanlan13-14/System-Easy/refs/heads/main/system.sh"
 
@@ -16,8 +13,8 @@ SCRIPT_URL="https://raw.githubusercontent.com/Lanlan13-14/System-Easy/refs/heads
 install_tools() {
     echo "正在更新软件包列表 📦..."
     apt update -y
-    echo "正在安装常用工具和依赖：curl、vim、git、python3-systemd、systemd-journal-remote、cron、at、net-tools、iproute2 unzip jq🚀..."
-    apt install -y curl vim git python3-systemd systemd-journal-remote cron at net-tools unzip jq iproute2
+    echo "正在安装常用工具和依赖：curl、vim、git、python3-systemd、systemd-journal-remote、cron、at、net-tools、iproute2、unzip、jq 🚀..."
+    apt install -y curl vim git python3-systemd systemd-journal-remote cron at net-tools iproute2 unzip jq
     if [ $? -eq 0 ]; then
         echo "所有工具和依赖安装完成 🎉"
     else
@@ -170,66 +167,62 @@ ssh_port_menu() {
 
     while true; do
         echo "SSH端口管理菜单 🔒："
-        echo "1. 修改SSH端口（原端口$current_port将保持有效直到手动禁用） ✏️"
-        echo "2. 禁用原登录端口 🚫"
-        echo "3. 返回主菜单 🔙"
+        echo "1. 修改SSH端口（原端口将立即失效） ✏️"
+        echo "2. 返回主菜单 🔙"
         read -p "请输入您的选择： " choice
         case $choice in
             1)
-                read -p "请输入新的SSH端口： " new_port
-                echo "$current_port" > "$SSH_PORT_FILE"
-                sed -i "/^Port /d" /etc/ssh/sshd_config
-                echo "Port $current_port" >> /etc/ssh/sshd_config
+                read -p "请输入新的SSH端口号（1-65535）： " new_port
+                # 验证端口有效性
+                if ! [[ "$new_port" =~ ^[0-9]+$ ]] || [ "$new_port" -lt 1 ] || [ "$new_port" -gt 65535 ]; then
+                    echo "无效端口号，请输入1-65535之间的数字 😕"
+                    continue
+                fi
+                # 检查端口是否被占用
+                if command -v ss >/dev/null && ss -tuln | grep -q ":$new_port "; then
+                    echo "端口 $new_port 已被占用，请选择其他端口 😔"
+                    continue
+                elif command -v netstat >/dev/null && netstat -tuln | grep -q ":$new_port "; then
+                    echo "端口 $new_port 已被占用，请选择其他端口 😔"
+                    continue
+                fi
+                # 备份SSH配置文件
+                cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak
+                # 修改SSH配置文件，替换所有Port配置
+                sed -i "/^#*Port /d" /etc/ssh/sshd_config
                 echo "Port $new_port" >> /etc/ssh/sshd_config
+                # 检查UFW并添加规则
                 if command -v ufw >/dev/null && ufw status | grep -q "Status: active"; then
                     echo "检测到UFW防火墙已启用，正在为新端口 $new_port 添加放行规则 🛡️..."
-                    ufw allow "$new_port"/tcp
-                    ufw reload
-                    echo "UFW规则已更新，新端口 $new_port 已放行 🎉"
-                fi
-                systemctl restart ssh
-                echo "SSH端口已修改，$current_port和$new_port均可使用 ✅"
-                current_port="$new_port"
-                ;;
-            2)
-                if [ -f "$SSH_PORT_FILE" ]; then
-                    old_port=$(cat "$SSH_PORT_FILE")
-                    echo "记录的原SSH端口：$old_port 🔍"
-                    read -p "是否禁用端口 $old_port？（y/n）： " confirm
-                    if [ "$confirm" = "y" ] || [ "$confirm" = "Y" ]; then
-                        sed -i "/^Port $old_port/d" /etc/ssh/sshd_config
-                        systemctl restart ssh
-                        rm -f "$SSH_PORT_FILE"
-                        echo "原端口$old_port已禁用，临时文件已删除 🗑️"
-                        if command -v ufw >/dev/null && ufw status | grep -q "Status: active"; then
-                            ufw delete allow "$old_port"/tcp
-                            ufw reload
-                            echo "UFW规则已更新，端口 $old_port 已移除 ✅"
-                        fi
+                    if ufw allow "$new_port"/tcp && ufw reload; then
+                        echo "UFW规则已更新，新端口 $new_port 已放行 🎉"
                     else
-                        read -p "请输入要禁用的端口： " manual_port
-                        sed -i "/^Port $manual_port/d" /etc/ssh/sshd_config
-                        systemctl restart ssh
-                        echo "端口$manual_port已禁用 ✅"
-                        if command -v ufw >/dev/null && ufw status | grep -q "Status: active"; then
-                            ufw delete allow "$manual_port"/tcp
-                            ufw reload
-                            echo "UFW规则已更新，端口 $manual_port 已移除 ✅"
-                        fi
+                        echo "UFW规则添加失败，正在回滚SSH配置 😔"
+                        mv /etc/ssh/sshd_config.bak /etc/ssh/sshd_config
+                        continue
+                    fi
+                fi
+                # 测试SSH配置
+                if sshd -t >/dev/null 2>&1; then
+                    # 重启SSH服务
+                    if systemctl restart ssh >/dev/null 2>&1; then
+                        echo "原端口已失效，SSH端口已修改为 $new_port，请用新端口登录，如无法登录，请检查防火墙是否放行 $new_port 端口 ❗"
+                        current_port="$new_port"
+                    else
+                        echo "SSH服务重启失败 😔 请检查："
+                        echo "  systemctl status ssh.service"
+                        echo "  journalctl -xeu ssh.service"
+                        mv /etc/ssh/sshd_config.bak /etc/ssh/sshd_config
+                        continue
                     fi
                 else
-                    read -p "未找到记录的原端口，请输入要禁用的端口： " manual_port
-                    sed -i "/^Port $manual_port/d" /etc/ssh/sshd_config
-                    systemctl restart ssh
-                    echo "端口$manual_port已禁用 ✅"
-                    if command -v ufw >/dev/null && ufw status | grep -q "Status: active"; then
-                        ufw delete allow "$manual_port"/tcp
-                        ufw reload
-                        echo "UFW规则已更新，端口 $manual_port 已移除 ✅"
-                    fi
+                    echo "SSH配置文件测试失败 😔 请检查："
+                    echo "  sshd -t"
+                    mv /etc/ssh/sshd_config.bak /etc/ssh/sshd_config
+                    continue
                 fi
                 ;;
-            3)
+            2)
                 return
                 ;;
             *)
@@ -272,8 +265,8 @@ set_timezone() {
     echo "当前系统时区：$(timedatectl show --property=Timezone --value) 🕒"
     echo "请选择时区："
     echo "[1] UTC 🌍"
-    echo "[2] Asia/Shanghai (中国标准时间)"
-    echo "[3] America/New_York (纽约时间)"
+    echo "[2] Asia/Shanghai（中国标准时间）"
+    echo "[3] America/New_York（纽约时间）"
     echo "[4] 手动输入时区 ✏️"
     read -p "请输入您的选择 [1-4]： " tz_choice
     case $tz_choice in
@@ -464,7 +457,7 @@ check_cpu_usage() {
                 fi
                 ;;
             2)
-                read -p "请输入要重启的进程ID（PID）： " pid
+                read -p "请输入要重启动的进程ID（PID）： " pid
                 if kill "$pid" && sleep 1 && command -v "$(ps -p "$pid" -o comm=)" >/dev/null; then
                     "$(ps -p "$pid" -o comm=)" &
                     echo "进程 $pid 已重启 🎉"

@@ -10,3 +10,6 @@ sudo system-easy
 ```
 ### 3. 卸载
 ##### 卸载选项在脚本中已提供
+
+### 特别感谢
+[byJoey](https://github.com/byJoey/Actions-bbr-v3)

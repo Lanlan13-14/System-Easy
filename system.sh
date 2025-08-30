@@ -363,22 +363,53 @@ update_script() {
 # 功能11：查看端口占用 🔍
 check_port_usage() {
     read -p "请输入要检查的端口号： " port
+    if ! [[ "$port" =~ ^[0-9]+$ ]] || [ "$port" -lt 1 ] || [ "$port" -gt 65535 ]; then
+        echo "无效端口号，请输入1-65535之间的数字 😕"
+        return
+    fi
+
+    echo "端口 $port 的占用情况 🔍："
+    echo "PID    Process Name    Address"
+    processes_found=0
     if command -v ss >/dev/null; then
-        processes=$(ss -tuln | grep ":$port" | awk '{print $5}' | grep ":$port$" && ps -aux | grep "$(ss -tuln -p | grep ":$port" | awk '{print $7}' | cut -d, -f1 | cut -d= -f2)")
+        # 使用 ss 获取监听端口的PID和进程信息
+        ss_output=$(ss -tuln -p | grep ":$port ")
+        if [ -n "$ss_output" ]; then
+            while read -r line; do
+                address=$(echo "$line" | awk '{print $5}')
+                pid=$(echo "$line" | grep -o 'pid=[0-9]*' | cut -d= -f2)
+                if [ -n "$pid" ]; then
+                    process_name=$(ps -p "$pid" -o comm= 2>/dev/null || echo "未知")
+                    echo "$pid    $process_name    $address"
+                    processes_found=1
+                fi
+            done <<< "$ss_output"
+        fi
     elif command -v netstat >/dev/null; then
-        processes=$(netstat -tulnp | grep ":$port" | awk '{print $7}' | cut -d/ -f2-)
+        # 使用 netstat 获取监听端口的PID和进程信息
+        netstat_output=$(netstat -tulnp | grep ":$port ")
+        if [ -n "$netstat_output" ]; then
+            while read -r line; do
+                address=$(echo "$line" | awk '{print $4}')
+                pid_process=$(echo "$line" | awk '{print $7}')
+                pid=$(echo "$pid_process" | cut -d/ -f1)
+                process_name=$(echo "$pid_process" | cut -d/ -f2-)
+                if [ -n "$pid" ]; then
+                    echo "$pid    $process_name    $address"
+                    processes_found=1
+                fi
+            done <<< "$netstat_output"
+        fi
     else
         echo "未安装 ss 或 netstat，无法检查端口占用 😔"
         return
     fi
 
-    if [ -z "$processes" ]; then
+    if [ $processes_found -eq 0 ]; then
         echo "端口 $port 未被占用 ✅"
         return
     fi
 
-    echo "端口 $port 被以下程序占用 🔍："
-    echo "$processes"
     while true; do
         echo "处理选项："
         echo "1. 关闭程序 🛑"
@@ -388,6 +419,10 @@ check_port_usage() {
         case $choice in
             1)
                 read -p "请输入要关闭的进程ID（PID）： " pid
+                if [[ ! "$pid" =~ ^[0-9]+$ ]] || ! ps -p "$pid" >/dev/null 2>&1; then
+                    echo "无效或不存在的PID：$pid，请检查 😔"
+                    continue
+                fi
                 if kill -9 "$pid"; then
                     echo "进程 $pid 已关闭 🎉"
                 else
@@ -396,8 +431,13 @@ check_port_usage() {
                 ;;
             2)
                 read -p "请输入要重启的进程ID（PID）： " pid
-                if kill "$pid" && sleep 1 && command -v "$(ps -p "$pid" -o comm=)" >/dev/null; then
-                    "$(ps -p "$pid" -o comm=)" &
+                if [[ ! "$pid" =~ ^[0-9]+$ ]] || ! ps -p "$pid" >/dev/null 2>&1; then
+                    echo "无效或不存在的PID：$pid，请检查 😔"
+                    continue
+                fi
+                process_cmd=$(ps -p "$pid" -o comm=)
+                if kill "$pid" && sleep 1 && command -v "$process_cmd" >/dev/null; then
+                    "$process_cmd" &
                     echo "进程 $pid 已重启 🎉"
                 else
                     echo "重启进程失败，请检查PID或程序是否可重启 😔"
@@ -427,6 +467,10 @@ check_memory_usage() {
         case $choice in
             1)
                 read -p "请输入要关闭的进程ID（PID）： " pid
+                if [[ ! "$pid" =~ ^[0-9]+$ ]] || ! ps -p "$pid" >/dev/null 2>&1; then
+                    echo "无效或不存在的PID：$pid，请检查 😔"
+                    continue
+                fi
                 if kill -9 "$pid"; then
                     echo "进程 $pid 已关闭 🎉"
                 else
@@ -435,8 +479,13 @@ check_memory_usage() {
                 ;;
             2)
                 read -p "请输入要重启的进程ID（PID）： " pid
-                if kill "$pid" && sleep 1 && command -v "$(ps -p "$pid" -o comm=)" >/dev/null; then
-                    "$(ps -p "$pid" -o comm=)" &
+                if [[ ! "$pid" =~ ^[0-9]+$ ]] || ! ps -p "$pid" >/dev/null 2>&1; then
+                    echo "无效或不存在的PID：$pid，请检查 😔"
+                    continue
+                fi
+                process_cmd=$(ps -p "$pid" -o comm=)
+                if kill "$pid" && sleep 1 && command -v "$process_cmd" >/dev/null; then
+                    "$process_cmd" &
                     echo "进程 $pid 已重启 🎉"
                 else
                     echo "重启进程失败，请检查PID或程序是否可重启 😔"
@@ -444,6 +493,10 @@ check_memory_usage() {
                 ;;
             3)
                 read -p "请输入要停止的进程ID（PID）： " pid
+                if [[ ! "$pid" =~ ^[0-9]+$ ]] || ! ps -p "$pid" >/dev/null 2>&1; then
+                    echo "无效或不存在的PID：$pid，请检查 😔"
+                    continue
+                fi
                 if kill "$pid"; then
                     echo "进程 $pid 已停止 🎉"
                 else
@@ -474,6 +527,10 @@ check_cpu_usage() {
         case $choice in
             1)
                 read -p "请输入要关闭的进程ID（PID）： " pid
+                if [[ ! "$pid" =~ ^[0-9]+$ ]] || ! ps -p "$pid" >/dev/null 2>&1; then
+                    echo "无效或不存在的PID：$pid，请检查 😔"
+                    continue
+                fi
                 if kill -9 "$pid"; then
                     echo "进程 $pid 已关闭 🎉"
                 else
@@ -482,8 +539,13 @@ check_cpu_usage() {
                 ;;
             2)
                 read -p "请输入要重启的进程ID（PID）： " pid
-                if kill "$pid" && sleep 1 && command -v "$(ps -p "$pid" -o comm=)" >/dev/null; then
-                    "$(ps -p "$pid" -o comm=)" &
+                if [[ ! "$pid" =~ ^[0-9]+$ ]] || ! ps -p "$pid" >/dev/null 2>&1; then
+                    echo "无效或不存在的PID：$pid，请检查 😔"
+                    continue
+                fi
+                process_cmd=$(ps -p "$pid" -o comm=)
+                if kill "$pid" && sleep 1 && command -v "$process_cmd" >/dev/null; then
+                    "$process_cmd" &
                     echo "进程 $pid 已重启 🎉"
                 else
                     echo "重启进程失败，请检查PID或程序是否可重启 😔"
@@ -491,6 +553,10 @@ check_cpu_usage() {
                 ;;
             3)
                 read -p "请输入要停止的进程ID（PID）： " pid
+                if [[ ! "$pid" =~ ^[0-9]+$ ]] || ! ps -p "$pid" >/dev/null 2>&1; then
+                    echo "无效或不存在的PID：$pid，请检查 😔"
+                    continue
+                fi
                 if kill "$pid"; then
                     echo "进程 $pid 已停止 🎉"
                 else

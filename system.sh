@@ -272,8 +272,8 @@ set_timezone() {
     echo "当前系统时区：$(timedatectl show --property=Timezone --value) 🕒"
     echo "请选择时区："
     echo "[1] UTC 🌍"
-    echo "[2] Asia/Shanghai（中国标准时间） 🇨🇳"
-    echo "[3] America/New_York（纽约时间） 🇺🇸"
+    echo "[2] Asia/Shanghai (中国标准时间)"
+    echo "[3] America/New_York (纽约时间)"
     echo "[4] 手动输入时区 ✏️"
     read -p "请输入您的选择 [1-4]： " tz_choice
     case $tz_choice in

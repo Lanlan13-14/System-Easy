@@ -16,8 +16,8 @@ SCRIPT_URL="https://raw.githubusercontent.com/Lanlan13-14/System-Easy/refs/heads
 install_tools() {
     echo "正在更新软件包列表 📦..."
     apt update -y
-    echo "正在安装常用工具和依赖：curl、vim、git、python3-systemd、systemd-journal-remote、cron、at、net-tools、iproute2 🚀..."
-    apt install -y curl vim git python3-systemd systemd-journal-remote cron at net-tools iproute2
+    echo "正在安装常用工具和依赖：curl、vim、git、python3-systemd、systemd-journal-remote、cron、at、net-tools、iproute2 unzip jq🚀..."
+    apt install -y curl vim git python3-systemd systemd-journal-remote cron at net-tools unzip jq iproute2
     if [ $? -eq 0 ]; then
         echo "所有工具和依赖安装完成 🎉"
     else

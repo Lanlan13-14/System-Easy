@@ -590,6 +590,120 @@ set_system_reboot() {
     done
 }
 
+# 功能15：Cron任务管理 ⏰
+cron_task_menu() {
+    while true; do
+        echo "Cron任务管理菜单 ⏰："
+        echo "1. 查看Cron任务 🔍"
+        echo "2. 删除Cron任务 🗑️"
+        echo "3. 添加Cron任务 ✏️"
+        echo "4. 返回主菜单 🔙"
+        read -p "请输入您的选择： " choice
+        case $choice in
+            1)
+                echo "当前所有Cron任务："
+                task_count=0
+                declare -A cron_tasks
+                # 遍历所有用户的Crontab
+                for user in $(ls /var/spool/cron/crontabs 2>/dev/null); do
+                    while IFS= read -r line; do
+                        # 跳过空行和注释
+                        if [[ -n "$line" && ! "$line" =~ ^# ]]; then
+                            task_count=$((task_count + 1))
+                            cron_tasks[$task_count]="$user: $line"
+                            echo "[$task_count] $user: $line"
+                        fi
+                    done < "/var/spool/cron/crontabs/$user"
+                done
+                if [ $task_count -eq 0 ]; then
+                    echo "无Cron任务 😕"
+                fi
+                ;;
+            2)
+                echo "当前所有Cron任务："
+                task_count=0
+                declare -A cron_tasks
+                declare -A cron_users
+                # 列出所有任务并分配编号
+                for user in $(ls /var/spool/cron/crontabs 2>/dev/null); do
+                    while IFS= read -r line; do
+                        if [[ -n "$line" && ! "$line" =~ ^# ]]; then
+                            task_count=$((task_count + 1))
+                            cron_tasks[$task_count]="$line"
+                            cron_users[$task_count]="$user"
+                            echo "[$task_count] $user: $line"
+                        fi
+                    done < "/var/spool/cron/crontabs/$user"
+                done
+                if [ $task_count -eq 0 ]; then
+                    echo "无Cron任务可删除 😕"
+                    continue
+                fi
+                read -p "请输入要删除的任务编号（多个编号用空格隔开，例如 1 3 5）： " delete_ids
+                # 验证输入
+                for id in $delete_ids; do
+                    if ! [[ "$id" =~ ^[0-9]+$ ]] || [ "$id" -lt 1 ] || [ "$id" -gt $task_count ]; then
+                        echo "无效编号：$id，请输入1-$task_count之间的数字 😕"
+                        continue 2
+                    fi
+                done
+                # 删除指定任务
+                for user in $(ls /var/spool/cron/crontabs 2>/dev/null); do
+                    temp_file=$(mktemp)
+                    cp "/var/spool/cron/crontabs/$user" "$temp_file"
+                    task_index=0
+                    keep_lines=()
+                    while IFS= read -r line; do
+                        if [[ -n "$line" && ! "$line" =~ ^# ]]; then
+                            task_index=$((task_index + 1))
+                            keep=1
+                            for id in $delete_ids; do
+                                if [ "$id" -eq "$task_index" ] && [ "${cron_users[$id]}" = "$user" ]; then
+                                    keep=0
+                                    break
+                                fi
+                            done
+                            if [ $keep -eq 1 ]; then
+                                keep_lines+=("$line")
+                            fi
+                        else
+                            keep_lines+=("$line")
+                        fi
+                    done < "/var/spool/cron/crontabs/$user"
+                    # 写入新Crontab
+                    printf "%s\n" "${keep_lines[@]}" > "/var/spool/cron/crontabs/$user"
+                    chown "$user:crontab" "/var/spool/cron/crontabs/$user"
+                    chmod 600 "/var/spool/cron/crontabs/$user"
+                    rm -f "$temp_file"
+                done
+                echo "已删除指定Cron任务 🎉"
+                ;;
+            3)
+                read -p "请输入完整Cron任务（格式：分钟 小时 日 月 星期 命令，例如 '0 2 * * * /path/to/script'）： " new_cron
+                # 基本验证Cron时间格式（5个字段 + 命令）
+                if [[ "$new_cron" =~ ^[0-9*,-/]+[[:space:]]+[0-9*,-/]+[[:space:]]+[0-9*,-/]+[[:space:]]+[0-9*,-/]+[[:space:]]+[0-7*,-/]+[[:space:]]+.+ ]]; then
+                    read -p "请输入任务所属用户（默认root）： " cron_user
+                    cron_user=${cron_user:-root}
+                    if id "$cron_user" >/dev/null 2>&1; then
+                        (crontab -u "$cron_user" -l 2>/dev/null; echo "$new_cron") | crontab -u "$cron_user" -
+                        echo "Cron任务已添加为用户 $cron_user：$new_cron 🎉"
+                    else
+                        echo "用户 $cron_user 不存在，任务添加失败 😔"
+                    fi
+                else
+                    echo "无效Cron任务格式，请使用正确格式（例如：0 2 * * * /path/to/script） 😕"
+                fi
+                ;;
+            4)
+                return
+                ;;
+            *)
+                echo "无效选择，请重试 😕"
+                ;;
+        esac
+    done
+}
+
 # 主菜单 📋
 while true; do
     echo "系统维护脚本菜单 📋："
@@ -607,7 +721,8 @@ while true; do
     echo "12. 查看内存占用最大程序 💾"
     echo "13. 查看CPU占用最大程序 🖥️"
     echo "14. 设置系统定时重启 🔄"
-    echo "15. 退出 🚪"
+    echo "15. Cron任务管理 ⏰"
+    echo "16. 退出 🚪"
     read -p "请输入您的选择： " main_choice
     case $main_choice in
         1) install_tools ;;
@@ -624,7 +739,8 @@ while true; do
         12) check_memory_usage ;;
         13) check_cpu_usage ;;
         14) set_system_reboot ;;
-        15) 
+        15) cron_task_menu ;;
+        16) 
             echo "👋 已退出，⚡ 下次使用直接运行: sudo system-easy"
             exit 0 
             ;;

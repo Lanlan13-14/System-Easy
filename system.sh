@@ -74,10 +74,6 @@ bbr_menu() {
                 return
                 ;;
             2)
-                if ! lsmod | grep -q tcp_bbr; then
-                    echo "未检测到BBR模块，请先选择'1. 安装BBR v3' 😕"
-                    continue
-                fi
                 echo "正在应用BBR优化配置 ⚙️..."
                 cat > /etc/sysctl.conf << EOF
 fs.file-max = 6815744

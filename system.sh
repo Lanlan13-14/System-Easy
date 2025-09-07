@@ -328,8 +328,13 @@ set_timezone() {
         read -p "请输入您的选择 [1-6]： " tz_choice
         case $tz_choice in
             1)
-                echo "当前系统时区：$(timedatectl show --property=Timezone --value) 🕒"
-                echo "NTP服务状态：$(timedatectl show --property=NTPSynchronized --value | grep -q 'yes' && echo '已同步' || echo '未同步')"
+                echo "当前系统时区：$(timedatectl show --property=Timezone --value 2>/dev/null || echo '无法获取时区信息')"
+                echo "NTP服务状态：$(timedatectl show --property=NTPSynchronized --value 2>/dev/null | grep -q 'yes' && echo '已同步' || echo '未同步')"
+                if systemctl is-active --quiet chronyd 2>/dev/null; then
+                    echo "chronyd 服务状态：运行中"
+                else
+                    echo "chronyd 服务状态：未运行"
+                fi
                 echo "按回车键返回菜单 🔙"
                 read
                 ;;
@@ -342,25 +347,34 @@ set_timezone() {
                 read -p "请输入您的选择 [1-4]： " tz_subchoice
                 case $tz_subchoice in
                     1)
-                        timedatectl set-timezone UTC
-                        echo "时区已设置为UTC 🎉"
+                        if timedatectl set-timezone UTC 2>/dev/null; then
+                            echo "时区已设置为UTC 🎉"
+                        else
+                            echo "时区设置失败，请检查 timedatectl 是否可用 😔"
+                        fi
                         ;;
                     2)
-                        timedatectl set-timezone Asia/Shanghai
-                        echo "时区已设置为Asia/Shanghai 🎉"
+                        if timedatectl set-timezone Asia/Shanghai 2>/dev/null; then
+                            echo "时区已设置为Asia/Shanghai 🎉"
+                        else
+                            echo "时区设置失败，请检查 timedatectl 是否可用 😔"
+                        fi
                         ;;
                     3)
-                        timedatectl set-timezone America/New_York
-                        echo "时区已设置为America/New_York 🎉"
+                        if timedatectl set-timezone America/New_York 2>/dev/null; then
+                            echo "时区已设置为America/New_York 🎉"
+                        else
+                            echo "时区设置失败，请检查 timedatectl 是否可用 😔"
+                        fi
                         ;;
                     4)
                         echo "请输入时区（格式示例：Asia/Shanghai 或 Europe/London） 📝"
                         echo "可使用 'timedatectl list-timezones' 查看可用时区 🔍"
                         read -p "请输入时区： " custom_tz
-                        if timedatectl set-timezone "$custom_tz"; then
+                        if timedatectl set-timezone "$custom_tz" 2>/dev/null; then
                             echo "时区已设置为$custom_tz 🎉"
                         else
-                            echo "时区设置失败，请检查输入格式（例如Asia/Shanghai） 😔"
+                            echo "时区设置失败，请检查输入格式（例如Asia/Shanghai）或 timedatectl 是否可用 😔"
                         fi
                         ;;
                     *)
@@ -454,15 +468,29 @@ EOF
                 if systemctl is-active --quiet chronyd; then
                     echo "NTP服务已启用并配置完成 🎉"
                     echo "使用的NTP服务器：${ntp_servers[*]}"
-                    # 启用系统NTP
-                    timedatectl set-ntp true
-                    echo "等待时间同步（可能需要几秒钟） ⏳..."
-                    sleep 5
-                    if timedatectl show --property=NTPSynchronized --value | grep -q 'yes'; then
-                        echo "时间同步成功，当前时间：$(date) ✅"
-                    else
-                        echo "时间同步尚未完成，请稍后检查（timedatectl status） 😔"
+                    # 尝试启用系统NTP（忽略不支持的情况）
+                    if ! timedatectl set-ntp true 2>/dev/null; then
+                        echo "警告：系统不支持 timedatectl set-ntp，依赖 chronyd 进行时间同步 ⚠️"
                     fi
+                    # 等待时间同步，最多尝试3次，每次10秒
+                    echo "等待时间同步（最多30秒） ⏳..."
+                    for attempt in {1..3}; do
+                        chronyc -a makestep >/dev/null 2>&1
+                        sleep 10
+                        if chronyc tracking >/dev/null 2>&1; then
+                            echo "时间同步成功，当前时间：$(date) ✅"
+                            break
+                        else
+                            if [ $attempt -eq 3 ]; then
+                                echo "时间同步尚未完成，请检查以下内容 😔："
+                                echo "  - 网络连接是否正常"
+                                echo "  - NTP服务器（${ntp_servers[*]}）是否可达"
+                                echo "  - 防火墙是否允许 UDP 123 端口"
+                                echo "  - 日志：journalctl -xeu chronyd"
+                                echo "您可以尝试选择'5. 立即进行时间同步'重试 🔄"
+                            fi
+                        fi
+                    done
                 else
                     echo "NTP服务启动失败，请检查：journalctl -xeu chronyd 😔"
                 fi
@@ -471,13 +499,17 @@ EOF
                 ;;
             4)
                 echo "正在禁用NTP时间同步 🚫..."
-                timedatectl set-ntp false
+                if timedatectl set-ntp false 2>/dev/null; then
+                    echo "系统NTP已禁用 🎉"
+                else
+                    echo "警告：系统不支持 timedatectl set-ntp，尝试停止 chronyd 服务 ⚠️"
+                fi
                 if systemctl is-active --quiet chronyd; then
                     systemctl stop chronyd >/dev/null 2>&1
                     systemctl disable chronyd >/dev/null 2>&1
-                    echo "NTP服务已禁用 🎉"
+                    echo "chronyd 服务已停止并禁用 🎉"
                 else
-                    echo "NTP服务未运行，无需禁用 ✅"
+                    echo "chronyd 服务未运行，无需禁用 ✅"
                 fi
                 echo "按回车键返回菜单 🔙"
                 read
@@ -492,11 +524,15 @@ EOF
                 fi
                 if systemctl is-active --quiet chronyd; then
                     chronyc -a makestep >/dev/null 2>&1
-                    sleep 3
-                    if timedatectl show --property=NTPSynchronized --value | grep -q 'yes'; then
+                    sleep 10
+                    if chronyc tracking >/dev/null 2>&1; then
                         echo "时间同步成功，当前时间：$(date) 🎉"
                     else
-                        echo "时间同步失败，请检查NTP服务状态（systemctl status chronyd） 😔"
+                        echo "时间同步失败，请检查以下内容 😔："
+                        echo "  - 网络连接是否正常"
+                        echo "  - NTP服务器是否可达"
+                        echo "  - 防火墙是否允许 UDP 123 端口"
+                        echo "  - 日志：journalctl -xeu chronyd"
                     fi
                 else
                     echo "NTP服务未运行，请先选择'3. 启用/配置NTP时间同步' 😕"

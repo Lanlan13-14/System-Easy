@@ -315,44 +315,177 @@ uninstall_script() {
     exit 0
 }
 
-# 功能9：设置系统时区 ⏰
+# 功能9：设置系统时区与时间同步 ⏰
 set_timezone() {
-    echo "当前系统时区：$(timedatectl show --property=Timezone --value) 🕒"
-    echo "请选择时区："
-    echo "[1] UTC 🌍"
-    echo "[2] Asia/Shanghai（中国标准时间）"
-    echo "[3] America/New_York（纽约时间）"
-    echo "[4] 手动输入时区 ✏️"
-    read -p "请输入您的选择 [1-4]： " tz_choice
-    case $tz_choice in
-        1)
-            timedatectl set-timezone UTC
-            echo "时区已设置为UTC 🎉"
-            ;;
-        2)
-            timedatectl set-timezone Asia/Shanghai
-            echo "时区已设置为Asia/Shanghai 🎉"
-            ;;
-        3)
-            timedatectl set-timezone America/New_York
-            echo "时区已设置为America/New_York 🎉"
-            ;;
-        4)
-            echo "请输入时区（格式示例：Asia/Shanghai 或 Europe/London） 📝"
-            echo "可使用 'timedatectl list-timezones' 查看可用时区 🔍"
-            read -p "请输入时区： " custom_tz
-            if timedatectl set-timezone "$custom_tz"; then
-                echo "时区已设置为$custom_tz 🎉"
-            else
-                echo "时区设置失败，请检查输入格式（例如Asia/Shanghai） 😔"
-            fi
-            ;;
-        *)
-            echo "无效选择，时区未更改 😕"
-            ;;
-    esac
-    echo "按回车键返回菜单 🔙"
-    read
+    while true; do
+        echo "系统时区与时间同步管理菜单 ⏰："
+        echo "1. 查看当前系统时区 🔍"
+        echo "2. 设置系统时区 🌍"
+        echo "3. 启用/配置NTP时间同步 🕒"
+        echo "4. 禁用NTP时间同步 🚫"
+        echo "5. 立即进行时间同步 🔄"
+        echo "6. 返回主菜单 🔙"
+        read -p "请输入您的选择 [1-6]： " tz_choice
+        case $tz_choice in
+            1)
+                echo "当前系统时区：$(timedatectl show --property=Timezone --value) 🕒"
+                echo "NTP服务状态：$(timedatectl show --property=NTPSynchronized --value | grep -q 'yes' && echo '已同步' || echo '未同步')"
+                echo "按回车键返回菜单 🔙"
+                read
+                ;;
+            2)
+                echo "请选择时区："
+                echo "[1] UTC 🌍"
+                echo "[2] Asia/Shanghai（中国标准时间）"
+                echo "[3] America/New_York（纽约时间）"
+                echo "[4] 手动输入时区 ✏️"
+                read -p "请输入您的选择 [1-4]： " tz_subchoice
+                case $tz_subchoice in
+                    1)
+                        timedatectl set-timezone UTC
+                        echo "时区已设置为UTC 🎉"
+                        ;;
+                    2)
+                        timedatectl set-timezone Asia/Shanghai
+                        echo "时区已设置为Asia/Shanghai 🎉"
+                        ;;
+                    3)
+                        timedatectl set-timezone America/New_York
+                        echo "时区已设置为America/New_York 🎉"
+                        ;;
+                    4)
+                        echo "请输入时区（格式示例：Asia/Shanghai 或 Europe/London） 📝"
+                        echo "可使用 'timedatectl list-timezones' 查看可用时区 🔍"
+                        read -p "请输入时区： " custom_tz
+                        if timedatectl set-timezone "$custom_tz"; then
+                            echo "时区已设置为$custom_tz 🎉"
+                        else
+                            echo "时区设置失败，请检查输入格式（例如Asia/Shanghai） 😔"
+                        fi
+                        ;;
+                    *)
+                        echo "无效选择，时区未更改 😕"
+                        ;;
+                esac
+                echo "按回车键返回菜单 🔙"
+                read
+                ;;
+            3)
+                echo "正在启用和配置NTP时间同步 ⏳..."
+                # 安装 chrony（如果未安装）
+                if ! command -v chronyd >/dev/null; then
+                    echo "未检测到chrony，正在安装..."
+                    apt update -y && apt install -y chrony
+                    if [ $? -eq 0 ]; then
+                        echo "chrony 安装成功 🎉"
+                    else
+                        echo "chrony 安装失败，请检查网络或软件源 😔"
+                        continue
+                    fi
+                fi
+                # 提供NTP服务器选择
+                echo "请选择NTP服务器："
+                echo "[1] ntp.ntsc.ac.cn（中国授时中心）"
+                echo "[2] ntp.tencent.com（腾讯公共 NTP 服务器）"
+                echo "[3] ntp.aliyun.com（阿里云公共 NTP 服务器）"
+                echo "[4] pool.ntp.org（国际 NTP 快速授时服务，默认）"
+                echo "[5] time1.google.com（Google公共 NTP 服务器）"
+                echo "[6] time.cloudflare.com（Cloudflare公共 NTP 服务器）"
+                echo "[7] time.asia.apple.com（Apple公共 NTP 服务器）"
+                echo "[8] time.windows.com（Microsoft公共 NTP 服务器）"
+                echo "[9] time.facebook.com（Facebook公共 NTP 服务器）"
+                read -p "请输入您的选择 [1-9]（直接回车默认选4）： " ntp_choice
+                # 设置默认值为4（pool.ntp.org）
+                ntp_choice=${ntp_choice:-4}
+                case $ntp_choice in
+                    1) ntp_servers=("ntp.ntsc.ac.cn") ;;
+                    2) ntp_servers=("ntp.tencent.com") ;;
+                    3) ntp_servers=("ntp.aliyun.com") ;;
+                    4) ntp_servers=("0.pool.ntp.org" "1.pool.ntp.org" "2.pool.ntp.org" "3.pool.ntp.org") ;;
+                    5) ntp_servers=("time1.google.com") ;;
+                    6) ntp_servers=("time.cloudflare.com") ;;
+                    7) ntp_servers=("time.asia.apple.com") ;;
+                    8) ntp_servers=("time.windows.com") ;;
+                    9) ntp_servers=("time.facebook.com") ;;
+                    *) 
+                        echo "无效选择，使用默认NTP服务器 pool.ntp.org 🎯"
+                        ntp_servers=("0.pool.ntp.org" "1.pool.ntp.org" "2.pool.ntp.org" "3.pool.ntp.org")
+                        ;;
+                esac
+                # 配置NTP服务器
+                cat > /etc/chrony/chrony.conf << EOF
+$(for server in "${ntp_servers[@]}"; do echo "server $server iburst"; done)
+keyfile /etc/chrony/chrony.keys
+driftfile /var/lib/chrony/chrony.drift
+logdir /var/log/chrony
+maxupdateskew 100.0
+rtcsync
+makestep 1.0 3
+EOF
+                # 启用并启动chrony服务
+                systemctl enable chronyd >/dev/null 2>&1
+                systemctl restart chronyd >/dev/null 2>&1
+                if systemctl is-active --quiet chronyd; then
+                    echo "NTP服务已启用并配置完成 🎉"
+                    echo "使用的NTP服务器：${ntp_servers[*]}"
+                    # 启用系统NTP
+                    timedatectl set-ntp true
+                    echo "等待时间同步（可能需要几秒钟） ⏳..."
+                    sleep 5
+                    if timedatectl show --property=NTPSynchronized --value | grep -q 'yes'; then
+                        echo "时间同步成功，当前时间：$(date) ✅"
+                    else
+                        echo "时间同步尚未完成，请稍后检查（timedatectl status） 😔"
+                    fi
+                else
+                    echo "NTP服务启动失败，请检查：journalctl -xeu chronyd 😔"
+                fi
+                echo "按回车键返回菜单 🔙"
+                read
+                ;;
+            4)
+                echo "正在禁用NTP时间同步 🚫..."
+                timedatectl set-ntp false
+                if systemctl is-active --quiet chronyd; then
+                    systemctl stop chronyd >/dev/null 2>&1
+                    systemctl disable chronyd >/dev/null 2>&1
+                    echo "NTP服务已禁用 🎉"
+                else
+                    echo "NTP服务未运行，无需禁用 ✅"
+                fi
+                echo "按回车键返回菜单 🔙"
+                read
+                ;;
+            5)
+                echo "正在进行时间同步 🔄..."
+                if ! command -v chronyd >/dev/null; then
+                    echo "未检测到chrony，请先选择'3. 启用/配置NTP时间同步' 😕"
+                    echo "按回车键返回菜单 🔙"
+                    read
+                    continue
+                fi
+                if systemctl is-active --quiet chronyd; then
+                    chronyc -a makestep >/dev/null 2>&1
+                    sleep 3
+                    if timedatectl show --property=NTPSynchronized --value | grep -q 'yes'; then
+                        echo "时间同步成功，当前时间：$(date) 🎉"
+                    else
+                        echo "时间同步失败，请检查NTP服务状态（systemctl status chronyd） 😔"
+                    fi
+                else
+                    echo "NTP服务未运行，请先选择'3. 启用/配置NTP时间同步' 😕"
+                fi
+                echo "按回车键返回菜单 🔙"
+                read
+                ;;
+            6)
+                return
+                ;;
+            *)
+                echo "无效选择，请重试 😕"
+                ;;
+        esac
+    done
 }
 
 # 功能10：更新脚本 📥
@@ -812,7 +945,7 @@ while true; do
     echo "6. SSH端口管理 🔒"
     echo "7. 修改SSH密码 🔑"
     echo "8. 卸载脚本 🗑️"
-    echo "9. 设置系统时区 ⏰"
+    echo "9. 设置系统时区与时间同步 ⏰"
     echo "10. 更新脚本 📥"
     echo "11. 查看端口占用 🔍"
     echo "12. 查看内存占用最大程序 💾"

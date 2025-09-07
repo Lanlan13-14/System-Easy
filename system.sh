@@ -394,7 +394,8 @@ set_timezone() {
                 echo "[7] time.asia.apple.com（Apple公共 NTP 服务器）"
                 echo "[8] time.windows.com（Microsoft公共 NTP 服务器）"
                 echo "[9] time.facebook.com（Facebook公共 NTP 服务器）"
-                read -p "请输入您的选择 [1-9]（直接回车默认选4）： " ntp_choice
+                echo "[10] 手动输入NTP服务器 ✏️"
+                read -p "请输入您的选择 [1-10]（直接回车默认选4）： " ntp_choice
                 # 设置默认值为4（pool.ntp.org）
                 ntp_choice=${ntp_choice:-4}
                 case $ntp_choice in
@@ -407,7 +408,32 @@ set_timezone() {
                     7) ntp_servers=("time.asia.apple.com") ;;
                     8) ntp_servers=("time.windows.com") ;;
                     9) ntp_servers=("time.facebook.com") ;;
-                    *) 
+                    10)
+                        read -p "请输入NTP服务器地址（多个地址用空格分隔，例如：ntp.example.com ntp2.example.com）： " custom_ntp
+                        if [ -z "$custom_ntp" ]; then
+                            echo "未输入NTP服务器地址，使用默认 pool.ntp.org 🎯"
+                            ntp_servers=("0.pool.ntp.org" "1.pool.ntp.org" "2.pool.ntp.org" "3.pool.ntp.org")
+                        else
+                            # 将输入的NTP服务器地址分割为数组
+                            read -a ntp_servers <<< "$custom_ntp"
+                            # 验证输入的NTP服务器地址（简单检查非空和格式）
+                            valid_servers=()
+                            for server in "${ntp_servers[@]}"; do
+                                if [[ "$server" =~ ^[a-zA-Z0-9.-]+$ ]]; then
+                                    valid_servers+=("$server")
+                                else
+                                    echo "警告：'$server' 格式无效，已忽略 😔"
+                                fi
+                            done
+                            if [ ${#valid_servers[@]} -eq 0 ]; then
+                                echo "无有效NTP服务器地址，使用默认 pool.ntp.org 🎯"
+                                ntp_servers=("0.pool.ntp.org" "1.pool.ntp.org" "2.pool.ntp.org" "3.pool.ntp.org")
+                            else
+                                ntp_servers=("${valid_servers[@]}")
+                            fi
+                        fi
+                        ;;
+                    *)
                         echo "无效选择，使用默认NTP服务器 pool.ntp.org 🎯"
                         ntp_servers=("0.pool.ntp.org" "1.pool.ntp.org" "2.pool.ntp.org" "3.pool.ntp.org")
                         ;;

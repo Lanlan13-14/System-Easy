@@ -884,6 +884,20 @@ set_system_reboot() {
 
 # 功能15：Cron任务管理 ⏰
 cron_task_menu() {
+    # 检查是否安装cron，如果没有，自动安装
+    if ! command -v crontab >/dev/null; then
+        echo "未检测到cron，正在自动安装... ⏳"
+        apt update -y && apt install -y cron
+        if [ $? -eq 0 ]; then
+            echo "cron 安装成功 🎉"
+            systemctl enable cron >/dev/null 2>&1
+            systemctl start cron >/dev/null 2>&1
+        else
+            echo "cron 安装失败，请检查网络或软件源 😔"
+            return
+        fi
+    fi
+
     while true; do
         echo "Cron任务管理菜单 ⏰："
         echo "1. 查看Cron任务 🔍"
@@ -996,6 +1010,78 @@ cron_task_menu() {
     done
 }
 
+# 功能16：SWAP管理 💾
+swap_menu() {
+    while true; do
+        echo "SWAP管理菜单 💾："
+        echo "1. 添加SWAP（自定义大小） ➕"
+        echo "2. 删除SWAP 🗑️"
+        echo "3. 查看当前SWAP状态 🔍"
+        echo "4. 返回主菜单 🔙"
+        read -p "请输入您的选择： " choice
+        case $choice in
+            1)
+                echo "当前SWAP信息："
+                swapon --show || echo "无SWAP分区或文件"
+                if swapon --show | grep -q '/swapfile'; then
+                    echo "警告：已存在 /swapfile，如果继续将覆盖现有SWAP ❗"
+                    read -p "是否继续？(y/n)： " confirm
+                    if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
+                        continue
+                    fi
+                    swapoff /swapfile 2>/dev/null
+                    rm -f /swapfile
+                    sed -i '/\/swapfile none swap sw 0 0/d' /etc/fstab
+                fi
+                read -p "请输入SWAP大小（单位GB，例如 4）： " size_gb
+                if ! [[ "$size_gb" =~ ^[0-9]+$ ]]; then
+                    echo "请输入有效的数字 😕"
+                    continue
+                fi
+                echo "正在创建 ${size_gb}GB SWAP文件 ⏳..."
+                fallocate -l ${size_gb}G /swapfile || dd if=/dev/zero of=/swapfile bs=1G count=$size_gb
+                if [ $? -ne 0 ]; then
+                    echo "创建SWAP文件失败，请检查磁盘空间 😔"
+                    continue
+                fi
+                chmod 600 /swapfile
+                mkswap /swapfile
+                swapon /swapfile
+                if [ $? -eq 0 ]; then
+                    echo "/swapfile none swap sw 0 0" >> /etc/fstab
+                    echo "SWAP已添加并持久化 🎉"
+                    swapon --show
+                else
+                    echo "启用SWAP失败 😔"
+                    rm -f /swapfile
+                fi
+                ;;
+            2)
+                echo "正在删除SWAP 🗑️..."
+                if swapon --show | grep -q '/swapfile'; then
+                    swapoff /swapfile
+                    rm -f /swapfile
+                    sed -i '/\/swapfile none swap sw 0 0/d' /etc/fstab
+                    echo "SWAP已删除 🎉"
+                else
+                    echo "无SWAP可删除 ✅"
+                fi
+                ;;
+            3)
+                echo "当前SWAP信息："
+                swapon --show || echo "无SWAP分区或文件"
+                free -h | grep Swap
+                ;;
+            4)
+                return
+                ;;
+            *)
+                echo "无效选择，请重试 😕"
+                ;;
+        esac
+    done
+}
+
 # 主菜单 📋
 while true; do
     echo "系统维护脚本菜单 📋："
@@ -1014,7 +1100,8 @@ while true; do
     echo "13. 查看CPU占用最大程序 🖥️"
     echo "14. 设置系统定时重启 🔄"
     echo "15. Cron任务管理 ⏰"
-    echo "16. 退出 🚪"
+    echo "16. SWAP管理 💾"
+    echo "17. 退出 🚪"
     read -p "请输入您的选择： " main_choice
     case $main_choice in
         1) install_tools ;;
@@ -1032,7 +1119,8 @@ while true; do
         13) check_cpu_usage ;;
         14) set_system_reboot ;;
         15) cron_task_menu ;;
-        16) 
+        16) swap_menu ;;
+        17) 
             echo "👋 已退出，⚡ 下次使用直接运行: sudo system-easy"
             exit 0 
             ;;

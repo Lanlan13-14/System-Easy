@@ -1014,7 +1014,7 @@ cron_task_menu() {
 swap_menu() {
     while true; do
         echo "SWAP管理菜单 💾："
-        echo "1. 添加SWAP（自定义大小） ➕"
+        echo "1. 添加SWAP（自定义大小，支持小数） ➕"
         echo "2. 删除SWAP 🗑️"
         echo "3. 查看当前SWAP状态 🔍"
         echo "4. 返回主菜单 🔙"
@@ -1033,13 +1033,19 @@ swap_menu() {
                     rm -f /swapfile
                     sed -i '/\/swapfile none swap sw 0 0/d' /etc/fstab
                 fi
-                read -p "请输入SWAP大小（单位GB，例如 4）： " size_gb
-                if ! [[ "$size_gb" =~ ^[0-9]+$ ]]; then
+                read -p "请输入SWAP大小（单位GB，可小数，例如 0.5）： " size_gb
+                if ! [[ "$size_gb" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
                     echo "请输入有效的数字 😕"
                     continue
                 fi
-                echo "正在创建 ${size_gb}GB SWAP文件 ⏳..."
-                fallocate -l ${size_gb}G /swapfile || dd if=/dev/zero of=/swapfile bs=1G count=$size_gb
+                # 转换成 MB
+                size_mb=$(awk "BEGIN {printf \"%d\", $size_gb*1024}")
+                if [ "$size_mb" -lt 1 ]; then
+                    echo "SWAP大小不能小于 1MB 😕"
+                    continue
+                fi
+                echo "正在创建 ${size_gb}GB (~${size_mb}MB) SWAP文件 ⏳..."
+                fallocate -l ${size_mb}M /swapfile || dd if=/dev/zero of=/swapfile bs=1M count=$size_mb
                 if [ $? -ne 0 ]; then
                     echo "创建SWAP文件失败，请检查磁盘空间 😔"
                     continue

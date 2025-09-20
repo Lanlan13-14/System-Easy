@@ -1088,6 +1088,75 @@ swap_menu() {
     done
 }
 
+# 新增功能17：TCP Fast Open (TFO) 管理子菜单 🚀
+tfo_menu() {
+    while true; do
+        echo "TCP Fast Open (TFO) 管理菜单 🚀："
+        echo "1. 查看当前TFO状态 🔍"
+        echo "2. 启用TFO ✅"
+        echo "3. 禁用TFO 🚫"
+        echo "4. 返回主菜单 🔙"
+        read -p "请输入您的选择： " choice
+        case $choice in
+            1)
+                echo "当前TCP Fast Open状态："
+                tfo_status=$(sysctl -n net.ipv4.tcp_fastopen 2>/dev/null || echo "未知")
+                case $tfo_status in
+                    0) echo "TFO已禁用 🚫" ;;
+                    1) echo "TFO启用（仅客户端） 🌐" ;;
+                    2) echo "TFO启用（仅服务器） 🖥️" ;;
+                    3) echo "TFO启用（客户端和服务器） 🚀" ;;
+                    *) echo "无法获取TFO状态，请检查内核支持 😔" ;;
+                esac
+                echo "按回车键返回菜单 🔙"
+                read
+                ;;
+            2)
+                echo "正在启用TCP Fast Open（客户端和服务器） ⏳..."
+                # 备份 sysctl.conf
+                cp /etc/sysctl.conf /etc/sysctl.conf.bak
+                # 设置 TFO 为 3（启用客户端和服务器）
+                sed -i '/net\.ipv4\.tcp_fastopen/d' /etc/sysctl.conf
+                echo "net.ipv4.tcp_fastopen=3" >> /etc/sysctl.conf
+                if sysctl -p >/dev/null 2>&1 && sysctl --system >/dev/null 2>&1; then
+                    echo "TCP Fast Open 已启用（客户端和服务器） 🎉"
+                    echo "当前TFO状态：$(sysctl -n net.ipv4.tcp_fastopen)"
+                else
+                    echo "启用TFO失败，请检查 /etc/sysctl.conf 或内核是否支持TFO 😔"
+                    mv /etc/sysctl.conf.bak /etc/sysctl.conf
+                    sysctl -p >/dev/null 2>&1
+                fi
+                echo "按回车键返回菜单 🔙"
+                read
+                ;;
+            3)
+                echo "正在禁用TCP Fast Open 🚫..."
+                # 备份 sysctl.conf
+                cp /etc/sysctl.conf /etc/sysctl.conf.bak
+                # 设置 TFO 为 0（禁用）
+                sed -i '/net\.ipv4\.tcp_fastopen/d' /etc/sysctl.conf
+                echo "net.ipv4.tcp_fastopen=0" >> /etc/sysctl.conf
+                if sysctl -p >/dev/null 2>&1 && sysctl --system >/dev/null 2>&1; then
+                    echo "TCP Fast Open 已禁用 🎉"
+                    echo "当前TFO状态：$(sysctl -n net.ipv4.tcp_fastopen)"
+                else
+                    echo "禁用TFO失败，请检查 /etc/sysctl.conf 😔"
+                    mv /etc/sysctl.conf.bak /etc/sysctl.conf
+                    sysctl -p >/dev/null 2>&1
+                fi
+                echo "按回车键返回菜单 🔙"
+                read
+                ;;
+            4)
+                return
+                ;;
+            *)
+                echo "无效选择，请重试 😕"
+                ;;
+        esac
+    done
+}
+
 # 主菜单 📋
 while true; do
     echo "系统维护脚本菜单 📋："
@@ -1107,7 +1176,8 @@ while true; do
     echo "14. 设置系统定时重启 🔄"
     echo "15. Cron任务管理 ⏰"
     echo "16. SWAP管理 💾"
-    echo "17. 退出 🚪"
+    echo "17. TCP Fast Open (TFO) 管理 🚀"  # 新增菜单项
+    echo "18. 退出 🚪"
     read -p "请输入您的选择： " main_choice
     case $main_choice in
         1) install_tools ;;
@@ -1126,9 +1196,10 @@ while true; do
         14) set_system_reboot ;;
         15) cron_task_menu ;;
         16) swap_menu ;;
-        17) 
+        17) tfo_menu ;;
+        18)
             echo "👋 已退出，⚡ 下次使用直接运行: sudo system-easy"
-            exit 0 
+            exit 0
             ;;
         *) echo "无效选择，请重试 😕" ;;
     esac

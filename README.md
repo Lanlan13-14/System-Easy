@@ -13,4 +13,4 @@ sudo system-easy
 
 ### 特别感谢
 [byJoey](https://github.com/byJoey/Actions-bbr-v3)
-[hawshemi]((https://github.com/hawshemi))
+[hawshemi](https://github.com/hawshemi)

@@ -47,6 +47,82 @@ log_cleanup_menu() {
         esac
     done
 }
+# BBR备份还原功能 🔄
+bbr_backup_restore() {
+    backups=($(ls /etc/sysctl.d/99-bbr.conf.bak_* 2>/dev/null | sort -r))
+    if [ ${#backups[@]} -eq 0 ]; then
+        echo "未找到任何备份文件 😔"
+        echo "按回车键返回菜单 🔙"
+        read
+        return
+    fi
+    echo "可用备份文件（按时间倒序）："
+    for i in "${!backups[@]}"; do
+        ts=$(basename "${backups[$i]}" | sed 's/99-bbr.conf.bak_//')
+        echo "[$((i+1))] $ts"
+    done
+    read -p "请选择要还原的备份编号（1-${#backups[@]}）： " num
+    if [[ $num =~ ^[0-9]+$ ]] && [ $num -ge 1 ] && [ $num -le ${#backups[@]} ]; then
+        selected="${backups[$((num-1))]}"
+        ts=$(basename "$selected" | sed 's/99-bbr.conf.bak_//')
+        echo "正在从备份 $ts 还原... ⏳"
+        if mv "$selected" /etc/sysctl.d/99-bbr.conf && sysctl --system; then
+            echo "备份 $ts 已成功还原 🎉"
+            echo "当前TCP拥塞控制算法：$(sysctl -n net.ipv4.tcp_congestion_control)"
+        else
+            echo "还原失败，请检查权限或文件 😔"
+        fi
+    else
+        echo "无效选择，请重试 😕"
+    fi
+    echo "按回车键返回菜单 🔙"
+    read
+}
+# BBR备份管理功能 💾
+bbr_backup_manage() {
+    while true; do
+        backups=($(ls /etc/sysctl.d/99-bbr.conf.bak_* 2>/dev/null | sort -r))
+        if [ ${#backups[@]} -eq 0 ]; then
+            echo "未找到任何备份文件 😔"
+            echo "按回车键返回菜单 🔙"
+            read
+            return
+        fi
+        echo "当前备份文件（按时间倒序）："
+        for i in "${!backups[@]}"; do
+            ts=$(basename "${backups[$i]}" | sed 's/99-bbr.conf.bak_//')
+            echo "[$((i+1))] $ts"
+        done
+        echo "0. 删除所有备份 🗑️"
+        echo "q. 返回菜单 🔙"
+        read -p "请输入要删除的备份编号（或0删除所有，q返回）： " choice
+        if [ "$choice" = "q" ] || [ "$choice" = "Q" ]; then
+            break
+        elif [ "$choice" = "0" ]; then
+            echo "正在删除所有备份... ⏳"
+            for b in "${backups[@]}"; do
+                rm -f "$b"
+            done
+            echo "所有备份已删除 🎉"
+            break
+        elif [[ $choice =~ ^[0-9]+$ ]] && [ $choice -ge 1 ] && [ $choice -le ${#backups[@]} ]; then
+            selected="${backups[$((choice-1))]}"
+            ts=$(basename "$selected" | sed 's/99-bbr.conf.bak_//')
+            echo "正在删除备份 $ts ... ⏳"
+            if rm -f "$selected"; then
+                echo "备份 $ts 已删除 🎉"
+            else
+                echo "删除失败，请检查权限 😔"
+            fi
+            echo "按回车键继续 🔄"
+            read
+        else
+            echo "无效选择，请重试 😕"
+            echo "按回车键继续 🔄"
+            read
+        fi
+    done
+}
 # 功能3：BBR管理子菜单 ⚡
 bbr_menu() {
     while true; do
@@ -54,7 +130,9 @@ bbr_menu() {
         echo "1. 安装BBR v3 🚀"
         echo "2. BBR调优 ⚙️"
         echo "3. 卸载BBR 🗑️"
-        echo "4. 返回主菜单 🔙"
+        echo "4. 备份管理 💾"
+        echo "5. 备份还原 🔄"
+        echo "6. 返回主菜单 🔙"
         read -p "请输入您的选择： " choice
         case $choice in
             1)
@@ -106,6 +184,12 @@ bbr_menu() {
                 read
                 ;;
             4)
+                bbr_backup_manage
+                ;;
+            5)
+                bbr_backup_restore
+                ;;
+            6)
                 return
                 ;;
             *)

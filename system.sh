@@ -1,11 +1,14 @@
 #!/bin/bash
+
 # 检查是否以root身份运行 🚨
 if [ "$(id -u)" != "0" ]; then
    echo "此脚本必须以root身份运行 🚨" 1>&2
    exit 1
 fi
+
 # 脚本URL
 SCRIPT_URL="https://raw.githubusercontent.com/Lanlan13-14/System-Easy/refs/heads/main/system.sh"
+
 # 功能1：安装常用工具和依赖 🛠️
 install_tools() {
     echo "正在更新软件包列表 📦..."
@@ -18,6 +21,7 @@ install_tools() {
         echo "安装失败，请检查网络或软件源 😔"
     fi
 }
+
 # 功能2：日志清理子菜单 🗑️
 log_cleanup_menu() {
     while true; do
@@ -47,82 +51,7 @@ log_cleanup_menu() {
         esac
     done
 }
-# BBR备份还原功能 🔄
-bbr_backup_restore() {
-    backups=($(ls /etc/sysctl.d/99-bbr.conf.bak_* 2>/dev/null | sort -r))
-    if [ ${#backups[@]} -eq 0 ]; then
-        echo "未找到任何备份文件 😔"
-        echo "按回车键返回菜单 🔙"
-        read
-        return
-    fi
-    echo "可用备份文件（按时间倒序）："
-    for i in "${!backups[@]}"; do
-        ts=$(basename "${backups[$i]}" | sed 's/99-bbr.conf.bak_//')
-        echo "[$((i+1))] $ts"
-    done
-    read -p "请选择要还原的备份编号（1-${#backups[@]}）： " num
-    if [[ $num =~ ^[0-9]+$ ]] && [ $num -ge 1 ] && [ $num -le ${#backups[@]} ]; then
-        selected="${backups[$((num-1))]}"
-        ts=$(basename "$selected" | sed 's/99-bbr.conf.bak_//')
-        echo "正在从备份 $ts 还原... ⏳"
-        if mv "$selected" /etc/sysctl.d/99-bbr.conf && sysctl --system; then
-            echo "备份 $ts 已成功还原 🎉"
-            echo "当前TCP拥塞控制算法：$(sysctl -n net.ipv4.tcp_congestion_control)"
-        else
-            echo "还原失败，请检查权限或文件 😔"
-        fi
-    else
-        echo "无效选择，请重试 😕"
-    fi
-    echo "按回车键返回菜单 🔙"
-    read
-}
-# BBR备份管理功能 💾
-bbr_backup_manage() {
-    while true; do
-        backups=($(ls /etc/sysctl.d/99-bbr.conf.bak_* 2>/dev/null | sort -r))
-        if [ ${#backups[@]} -eq 0 ]; then
-            echo "未找到任何备份文件 😔"
-            echo "按回车键返回菜单 🔙"
-            read
-            return
-        fi
-        echo "当前备份文件（按时间倒序）："
-        for i in "${!backups[@]}"; do
-            ts=$(basename "${backups[$i]}" | sed 's/99-bbr.conf.bak_//')
-            echo "[$((i+1))] $ts"
-        done
-        echo "0. 删除所有备份 🗑️"
-        echo "q. 返回菜单 🔙"
-        read -p "请输入要删除的备份编号（或0删除所有，q返回）： " choice
-        if [ "$choice" = "q" ] || [ "$choice" = "Q" ]; then
-            break
-        elif [ "$choice" = "0" ]; then
-            echo "正在删除所有备份... ⏳"
-            for b in "${backups[@]}"; do
-                rm -f "$b"
-            done
-            echo "所有备份已删除 🎉"
-            break
-        elif [[ $choice =~ ^[0-9]+$ ]] && [ $choice -ge 1 ] && [ $choice -le ${#backups[@]} ]; then
-            selected="${backups[$((choice-1))]}"
-            ts=$(basename "$selected" | sed 's/99-bbr.conf.bak_//')
-            echo "正在删除备份 $ts ... ⏳"
-            if rm -f "$selected"; then
-                echo "备份 $ts 已删除 🎉"
-            else
-                echo "删除失败，请检查权限 😔"
-            fi
-            echo "按回车键继续 🔄"
-            read
-        else
-            echo "无效选择，请重试 😕"
-            echo "按回车键继续 🔄"
-            read
-        fi
-    done
-}
+
 # 功能3：BBR管理子菜单 ⚡
 bbr_menu() {
     while true; do
@@ -130,9 +59,7 @@ bbr_menu() {
         echo "1. 安装BBR v3 🚀"
         echo "2. BBR调优 ⚙️"
         echo "3. 卸载BBR 🗑️"
-        echo "4. 备份管理 💾"
-        echo "5. 备份还原 🔄"
-        echo "6. 返回主菜单 🔙"
+        echo "4. 返回主菜单 🔙"
         read -p "请输入您的选择： " choice
         case $choice in
             1)
@@ -148,12 +75,38 @@ bbr_menu() {
                 ;;
             2)
                 echo "正在应用BBR优化配置 ⚙️..."
-                bash <(curl -sL https://raw.githubusercontent.com/Lanlan13-14/System-Easy/refs/heads/main/bbr-optimization.sh)
-                if [ $? -eq 0 ]; then
+                cat > /etc/sysctl.conf << EOF
+fs.file-max = 6815744
+net.ipv4.tcp_no_metrics_save=1
+net.ipv4.tcp_ecn=0
+net.ipv4.tcp_frto=0
+net.ipv4.tcp_mtu_probing=0
+net.ipv4.tcp_rfc1337=0
+net.ipv4.tcp_sack=1
+net.ipv4.tcp_fack=1
+net.ipv4.tcp_window_scaling=1
+net.ipv4.tcp_adv_win_scale=1
+net.ipv4.tcp_moderate_rcvbuf=1
+net.core.rmem_max=33554432
+net.core.wmem_max=33554432
+net.ipv4.tcp_rmem=4096 87380 33554432
+net.ipv4.tcp_wmem=4096 16384 33554432
+net.ipv4.udp_rmem_min=8192
+net.ipv4.udp_wmem_min=8192
+net.ipv4.ip_forward=1
+net.ipv4.conf.all.route_localnet=1
+net.ipv4.conf.all.forwarding=1
+net.ipv4.conf.default.forwarding=1
+net.core.default_qdisc=fq
+net.ipv4.tcp_congestion_control=bbr
+net.ipv6.conf.all.forwarding=1
+net.ipv6.conf.default.forwarding=1
+EOF
+                if sysctl -p && sysctl --system; then
                     echo "BBR优化配置已应用 🎉"
                     echo "当前TCP拥塞控制算法：$(sysctl -n net.ipv4.tcp_congestion_control)"
                 else
-                    echo "BBR优化配置应用失败，请检查网络或脚本执行日志 😔"
+                    echo "BBR优化配置应用失败，请检查 /etc/sysctl.conf 😔"
                 fi
                 echo "按回车键返回菜单 🔙"
                 read
@@ -184,12 +137,6 @@ bbr_menu() {
                 read
                 ;;
             4)
-                bbr_backup_manage
-                ;;
-            5)
-                bbr_backup_restore
-                ;;
-            6)
                 return
                 ;;
             *)
@@ -198,6 +145,7 @@ bbr_menu() {
         esac
     done
 }
+
 # 功能4：DNS管理子菜单 🌐
 dns_menu() {
     while true; do
@@ -231,6 +179,7 @@ dns_menu() {
         esac
     done
 }
+
 # 功能5：修改主机名 🖥️
 change_hostname() {
     current_hostname=$(hostname)
@@ -241,10 +190,12 @@ change_hostname() {
     sed -i "s/$current_hostname/$new_hostname/g" /etc/hosts
     echo "主机名已更改为$new_hostname 🎉"
 }
+
 # 功能6：SSH端口管理子菜单 🔒
 ssh_port_menu() {
     current_port=$(grep "^Port" /etc/ssh/sshd_config | awk '{print $2}' | head -n 1 || echo "22")
     echo "当前SSH端口：$current_port 🔍"
+
     while true; do
         echo "SSH端口管理菜单 🔒："
         echo "1. 修改SSH端口（原端口将立即失效） ✏️"
@@ -290,14 +241,14 @@ ssh_port_menu() {
                         current_port="$new_port"
                     else
                         echo "SSH服务重启失败 😔 请检查："
-                        echo " systemctl status ssh.service"
-                        echo " journalctl -xeu ssh.service"
+                        echo "  systemctl status ssh.service"
+                        echo "  journalctl -xeu ssh.service"
                         mv /etc/ssh/sshd_config.bak /etc/ssh/sshd_config
                         continue
                     fi
                 else
                     echo "SSH配置文件测试失败 😔 请检查："
-                    echo " sshd -t"
+                    echo "  sshd -t"
                     mv /etc/ssh/sshd_config.bak /etc/ssh/sshd_config
                     continue
                 fi
@@ -311,6 +262,7 @@ ssh_port_menu() {
         esac
     done
 }
+
 # 功能7：修改SSH密码 🔑
 change_ssh_password() {
     echo "生成一个20位复杂密码 🔐..."
@@ -330,27 +282,31 @@ change_ssh_password() {
     echo "生成的密码：$new_pass"
     echo "警告：修改后，仅新密码可用于登录，旧密码将失效 ❗"
     echo "您可以直接使用以上生成的密码，或输入自定义密码。"
+
     read -p "请输入新密码（可见，留空使用生成密码）： " pass1
     if [ -z "$pass1" ]; then
         pass1="$new_pass"
     fi
     read -p "请再次确认新密码（可见）： " pass2
+
     if [ "$pass1" != "$pass2" ]; then
         echo "两次输入的密码不匹配，操作取消 😔"
         return
     fi
+
     # 尝试修改密码
     if echo "root:$pass1" | chpasswd; then
         echo "SSH密码已更改，新密码为：$pass1 🎉"
         echo "请保存新密码，并立即测试SSH登录（ssh root@your_server -p $current_port） ❗"
         echo "如果无法登录，请检查："
-        echo " journalctl -xeu ssh.service"
+        echo "  journalctl -xeu ssh.service"
     else
         echo "密码修改失败 😔 请检查："
-        echo " journalctl -xeu ssh.service"
+        echo "  journalctl -xeu ssh.service"
         echo "您可以尝试手动修改密码：sudo passwd root"
     fi
 }
+
 # 功能8：卸载脚本 🗑️
 uninstall_script() {
     echo "正在卸载脚本（仅删除脚本本身） 🗑️..."
@@ -358,6 +314,7 @@ uninstall_script() {
     echo "脚本已删除，即将退出 🚪"
     exit 0
 }
+
 # 功能9：设置系统时区与时间同步 ⏰
 set_timezone() {
     while true; do
@@ -526,10 +483,10 @@ EOF
                         else
                             if [ $attempt -eq 3 ]; then
                                 echo "时间同步尚未完成，请检查以下内容 😔："
-                                echo " - 网络连接是否正常"
-                                echo " - NTP服务器（${ntp_servers[*]}）是否可达"
-                                echo " - 防火墙是否允许 UDP 123 端口"
-                                echo " - 日志：journalctl -xeu chronyd"
+                                echo "  - 网络连接是否正常"
+                                echo "  - NTP服务器（${ntp_servers[*]}）是否可达"
+                                echo "  - 防火墙是否允许 UDP 123 端口"
+                                echo "  - 日志：journalctl -xeu chronyd"
                                 echo "您可以尝试选择'5. 立即进行时间同步'重试 🔄"
                             fi
                         fi
@@ -572,10 +529,10 @@ EOF
                         echo "时间同步成功，当前时间：$(date) 🎉"
                     else
                         echo "时间同步失败，请检查以下内容 😔："
-                        echo " - 网络连接是否正常"
-                        echo " - NTP服务器是否可达"
-                        echo " - 防火墙是否允许 UDP 123 端口"
-                        echo " - 日志：journalctl -xeu chronyd"
+                        echo "  - 网络连接是否正常"
+                        echo "  - NTP服务器是否可达"
+                        echo "  - 防火墙是否允许 UDP 123 端口"
+                        echo "  - 日志：journalctl -xeu chronyd"
                     fi
                 else
                     echo "NTP服务未运行，请先选择'3. 启用/配置NTP时间同步' 😕"
@@ -592,6 +549,7 @@ EOF
         esac
     done
 }
+
 # 功能10：更新脚本 📥
 update_script() {
     echo "正在更新脚本 📥..."
@@ -599,6 +557,7 @@ update_script() {
     backup_file="/tmp/system-easy-backup-$(date +%Y%m%d%H%M%S).sh"
     cp /usr/local/bin/system-easy "$backup_file"
     echo "当前脚本已备份为：$backup_file 📂"
+
     # 下载新脚本
     echo "正在从 $SCRIPT_URL 下载新脚本 ⏳..."
     if curl -L "$SCRIPT_URL" -o /tmp/system-easy-new; then
@@ -626,6 +585,7 @@ update_script() {
         exec /usr/local/bin/system-easy
     fi
 }
+
 # 功能11：查看端口占用 🔍
 check_port_usage() {
     read -p "请输入要检查的端口号： " port
@@ -633,8 +593,9 @@ check_port_usage() {
         echo "无效端口号，请输入1-65535之间的数字 😕"
         return
     fi
+
     echo "端口 $port 的占用情况 🔍："
-    echo "PID Process Name Address"
+    echo "PID    Process Name    Address"
     processes_found=0
     if command -v ss >/dev/null; then
         # 使用 ss 获取监听端口的PID和进程信息
@@ -645,7 +606,7 @@ check_port_usage() {
                 pid=$(echo "$line" | grep -o 'pid=[0-9]*' | cut -d= -f2)
                 if [ -n "$pid" ]; then
                     process_name=$(ps -p "$pid" -o comm= 2>/dev/null || echo "未知")
-                    echo "$pid $process_name $address"
+                    echo "$pid    $process_name    $address"
                     processes_found=1
                 fi
             done <<< "$ss_output"
@@ -660,7 +621,7 @@ check_port_usage() {
                 pid=$(echo "$pid_process" | cut -d/ -f1)
                 process_name=$(echo "$pid_process" | cut -d/ -f2-)
                 if [ -n "$pid" ]; then
-                    echo "$pid $process_name $address"
+                    echo "$pid    $process_name    $address"
                     processes_found=1
                 fi
             done <<< "$netstat_output"
@@ -669,10 +630,12 @@ check_port_usage() {
         echo "未安装 ss 或 netstat，无法检查端口占用 😔"
         return
     fi
+
     if [ $processes_found -eq 0 ]; then
         echo "端口 $port 未被占用 ✅"
         return
     fi
+
     while true; do
         echo "处理选项："
         echo "1. 关闭程序 🛑"
@@ -715,6 +678,7 @@ check_port_usage() {
         esac
     done
 }
+
 # 功能12：查看内存占用最大程序 💾
 check_memory_usage() {
     echo "内存占用最大的5个进程 💾："
@@ -774,6 +738,7 @@ check_memory_usage() {
         esac
     done
 }
+
 # 功能13：查看CPU占用最大程序 🖥️
 check_cpu_usage() {
     echo "CPU占用最大的5个进程 🖥️："
@@ -833,6 +798,7 @@ check_cpu_usage() {
         esac
     done
 }
+
 # 功能14：设置系统定时重启 🔄
 set_system_reboot() {
     while true; do
@@ -915,6 +881,7 @@ set_system_reboot() {
         esac
     done
 }
+
 # 功能15：Cron任务管理 ⏰
 cron_task_menu() {
     # 检查是否安装cron，如果没有，自动安装
@@ -930,6 +897,7 @@ cron_task_menu() {
             return
         fi
     fi
+
     while true; do
         echo "Cron任务管理菜单 ⏰："
         echo "1. 查看Cron任务 🔍"
@@ -1041,6 +1009,7 @@ cron_task_menu() {
         esac
     done
 }
+
 # 功能16：SWAP管理 💾
 swap_menu() {
     while true; do
@@ -1118,6 +1087,7 @@ swap_menu() {
         esac
     done
 }
+
 # 新增功能17：TCP Fast Open (TFO) 管理子菜单 🚀
 tfo_menu() {
     while true; do
@@ -1186,6 +1156,7 @@ tfo_menu() {
         esac
     done
 }
+
 # 主菜单 📋
 while true; do
     echo "系统维护脚本菜单 📋："
@@ -1205,7 +1176,7 @@ while true; do
     echo "14. 设置系统定时重启 🔄"
     echo "15. Cron任务管理 ⏰"
     echo "16. SWAP管理 💾"
-    echo "17. TCP Fast Open (TFO) 管理 🚀" # 新增菜单项
+    echo "17. TCP Fast Open (TFO) 管理 🚀"  # 新增菜单项
     echo "18. 退出 🚪"
     read -p "请输入您的选择： " main_choice
     case $main_choice in

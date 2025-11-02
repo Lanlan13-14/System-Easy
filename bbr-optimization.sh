@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
-# ==============================================================================
-# Linux TCP/IP & BBR 智能优化脚本
-# ==============================================================================
+
 # --- 脚本版本号定义 ---
-SCRIPT_VERSION="1.6.2"
+SCRIPT_VERSION="1.6.1"
+
 set -euo pipefail
 
 # --- 颜色定义 ---
@@ -21,6 +20,7 @@ CONF_FILE="/etc/sysctl.d/99-bbr.conf"
 get_system_info() {
     TOTAL_MEM=$(free -m | awk '/^Mem:/{print $2}' | tr -d '\r')
     CPU_CORES=$(nproc | tr -d '\r')
+    
     if command -v systemd-detect-virt >/dev/null 2>&1; then
         VIRT_TYPE=$(systemd-detect-virt)
     elif grep -q -i "hypervisor" /proc/cpuinfo; then
@@ -30,10 +30,12 @@ get_system_info() {
     else
         VIRT_TYPE="unknown"
     fi
+
     echo -e "${CYAN}>>> 系统信息检测：${NC}"
-    echo -e "内存大小 : ${YELLOW}${TOTAL_MEM}MB${NC}"
-    echo -e "CPU核心数 : ${YELLOW}${CPU_CORES}${NC}"
+    echo -e "内存大小   : ${YELLOW}${TOTAL_MEM}MB${NC}"
+    echo -e "CPU核心数  : ${YELLOW}${CPU_CORES}${NC}"
     echo -e "虚拟化类型 : ${YELLOW}${VIRT_TYPE}${NC}"
+    
     calculate_parameters
 }
 
@@ -109,7 +111,6 @@ pre_flight_checks() {
         echo -e "${RED}❌ 错误: 此脚本必须以root权限运行。${NC}"
         exit 1
     fi
-
     local KERNEL_VERSION
     KERNEL_VERSION=$(uname -r)
     if [[ $(printf '%s\n' "4.9" "$KERNEL_VERSION" | sort -V | head -n1) != "4.9" ]]; then
@@ -118,13 +119,9 @@ pre_flight_checks() {
     else
         echo -e "${GREEN}✅ 内核版本 $KERNEL_VERSION, 支持BBR。${NC}"
     fi
-
     if ! sysctl net.ipv4.tcp_available_congestion_control | grep -q "bbr"; then
-        echo -e "${YELLOW}⚠️ 警告: BBR模块未加载，尝试加载...${NC}"
-        modprobe tcp_bbr 2>/dev/null || {
-            echo -e "${RED}❌ 无法加载BBR模块, 请检查内核。${NC}"
-            exit 1
-        }
+        echo -e "${YELLOW}⚠️  警告: BBR模块未加载，尝试加载...${NC}"
+        modprobe tcp_bbr 2>/dev/null || { echo -e "${RED}❌ 无法加载BBR模块, 请检查内核。${NC}"; exit 1; }
     fi
 }
 
@@ -146,7 +143,6 @@ manage_backups() {
         echo -e "${YELLOW}>>> 创建当前配置备份: $BAK_FILE${NC}"
         cp "$CONF_FILE" "$BAK_FILE"
     fi
-
     local old_backups
     set +e
     old_backups=$(ls -t "$CONF_FILE.bak_"* 2>/dev/null | tail -n +2)
@@ -193,12 +189,8 @@ EOF
 # --- 应用与验证 ---
 apply_and_verify() {
     echo -e "${CYAN}>>> 使配置生效...${NC}"
-    sysctl --system >/dev/null 2>&1 || {
-        echo -e "${RED}❌ 配置应用失败, 请检查 $CONF_FILE 文件格式。${NC}"
-        exit 1
-    }
+    sysctl --system >/dev/null 2>&1 || { echo -e "${RED}❌ 配置应用失败, 请检查 $CONF_FILE 文件格式。${NC}"; exit 1; }
     echo -e "${GREEN}✅ 配置已动态生效。${NC}"
-
     echo -e "${CYAN}>>> 验证优化结果...${NC}"
     local CURRENT_CC
     CURRENT_CC=$(sysctl -n net.ipv4.tcp_congestion_control)
@@ -227,21 +219,21 @@ show_tips() {
     echo -e "${YELLOW}--------------------------------------------------${NC}"
 }
 
-# --- 冲突配置检查函数 ---
+# --- 冲突配置检查函数 (修复版) ---
 check_for_conflicts() {
     local key_params=("net.ipv4.tcp_congestion_control" "net.core.default_qdisc")
     local conflicting_files=""
     local pattern
+    
     # 构建grep模式
     pattern=$(printf '%s\|' "${key_params[@]}")
-    pattern="${pattern%\\|}"
-    # 移除末尾的\|
-
+    pattern="${pattern%\\|}"  # 移除末尾的\|
+    
     # 检查主配置文件
     if grep -qE "$pattern" /etc/sysctl.conf 2>/dev/null; then
         conflicting_files+="\n - /etc/sysctl.conf"
     fi
-
+    
     # 检查其他配置文件
     for conf_file in /etc/sysctl.d/*.conf; do
         if [ "$conf_file" != "$CONF_FILE" ] && [ -f "$conf_file" ]; then
@@ -250,10 +242,10 @@ check_for_conflicts() {
             fi
         fi
     done
-
+    
     if [ -n "$conflicting_files" ]; then
         echo -e "\n${YELLOW}---------------------- 注意 ----------------------${NC}"
-        echo -e "${YELLOW}⚠️ 系统在以下文件中也发现了BBR相关设置:${NC}"
+        echo -e "${YELLOW}⚠️  系统在以下文件中也发现了BBR相关设置:${NC}"
         echo -e "${CYAN}${conflicting_files}${NC}"
         echo -e "${YELLOW}为避免配置混乱, 建议您手动编辑这些文件,${NC}"
         echo -e "${YELLOW}注释或删除其中的冲突行。您的脚本 (${CYAN}$CONF_FILE${YELLOW}) 已生效。${NC}"
@@ -298,7 +290,6 @@ revert_optimizations() {
         echo -e "${GREEN}✅ 系统未发现优化配置文件，无需操作。${NC}"
         return 0
     fi
-
     echo -e "${CYAN}>>> 使恢复后的配置生效...${NC}"
     sysctl --system >/dev/null 2>&1
     echo -e "${GREEN}🎉 优化已成功撤销！系统将恢复到内核默认或之前的配置。${NC}"
@@ -312,9 +303,9 @@ main() {
     fi
 
     echo -e "${CYAN}======================================================${NC}"
-    echo -e "${CYAN} Linux TCP/IP & BBR 智能优化脚本 v${SCRIPT_VERSION} ${NC}"
+    echo -e "${CYAN}      Linux TCP/IP & BBR 智能优化脚本 v${SCRIPT_VERSION}      ${NC}"
     echo -e "${CYAN}======================================================${NC}"
-
+    
     check_if_already_applied
     pre_flight_checks
     get_system_info
@@ -323,7 +314,9 @@ main() {
     apply_and_verify
     show_tips
     check_for_conflicts
+    
     echo -e "\n${GREEN}🎉 所有优化已完成并生效！${NC}"
+    
     exit 0
 }
 

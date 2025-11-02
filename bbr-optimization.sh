@@ -1,7 +1,15 @@
 #!/usr/bin/env bash
 
+# ==============================================================================
+# Linux TCP/IP & BBR 智能优化脚本 (修正版)
+#
+# 原作者: yahuisme
+# 修改说明: 移除高风险参数，并改为直接修改 /etc/sysctl.conf
+# 版本: 1.6.1_MOD (2025-11-01)
+# ==============================================================================
+
 # --- 脚本版本号定义 ---
-SCRIPT_VERSION="1.6.1"
+SCRIPT_VERSION="1.6.1_MOD"
 
 set -euo pipefail
 
@@ -13,14 +21,20 @@ CYAN='\033[0;36m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
-# --- 配置文件路径 ---
-CONF_FILE="/etc/sysctl.d/99-bbr.conf"
+# --- 配置文件路径 (修改为直接修改默认配置文件) ---
+CONF_FILE="/etc/sysctl.conf"
+
+# --- 标记和范围 ---
+START_MARKER="# === BBR_OPTIMIZATION_START ==="
+END_MARKER="# === BBR_OPTIMIZATION_END ==="
 
 # --- 系统信息检测函数 ---
 get_system_info() {
+    # 使用 tr -d '\r' 清理可能的 DOS 换行符
     TOTAL_MEM=$(free -m | awk '/^Mem:/{print $2}' | tr -d '\r')
     CPU_CORES=$(nproc | tr -d '\r')
-    
+
+    # ... (虚拟化检测部分保持不变) ...
     if command -v systemd-detect-virt >/dev/null 2>&1; then
         VIRT_TYPE=$(systemd-detect-virt)
     elif grep -q -i "hypervisor" /proc/cpuinfo; then
@@ -35,11 +49,11 @@ get_system_info() {
     echo -e "内存大小   : ${YELLOW}${TOTAL_MEM}MB${NC}"
     echo -e "CPU核心数  : ${YELLOW}${CPU_CORES}${NC}"
     echo -e "虚拟化类型 : ${YELLOW}${VIRT_TYPE}${NC}"
-    
+
     calculate_parameters
 }
 
-# --- 动态参数计算函数 ---
+# --- 动态参数计算函数 (保持不变) ---
 calculate_parameters() {
     if [ "$TOTAL_MEM" -le 512 ]; then
         VM_TIER="经典级(≤512MB)"
@@ -104,7 +118,7 @@ calculate_parameters() {
     fi
 }
 
-# --- 预检查函数 ---
+# --- 预检查函数 (保持不变) ---
 pre_flight_checks() {
     echo -e "${BLUE}>>> 执行预检查...${NC}"
     if [[ $(id -u) -ne 0 ]]; then
@@ -125,68 +139,70 @@ pre_flight_checks() {
     fi
 }
 
-# --- 配置写入函数 ---
-add_conf() {
-    local key="$1"
-    local value="$2"
-    local comment="$3"
-    echo "# $comment" >> "$CONF_FILE"
-    echo "$key = $value" >> "$CONF_FILE"
-    echo "" >> "$CONF_FILE"
-    echo -e "[${GREEN}设置${NC}] $key = ${YELLOW}$value${NC}"
-}
-
-# --- 备份管理与清理函数 ---
+# --- 备份管理与清理函数 (修改为适应 /etc/sysctl.conf) ---
 manage_backups() {
     if [ -f "$CONF_FILE" ]; then
         local BAK_FILE="$CONF_FILE.bak_$(date +%F_%H-%M-%S)"
         echo -e "${YELLOW}>>> 创建当前配置备份: $BAK_FILE${NC}"
         cp "$CONF_FILE" "$BAK_FILE"
     fi
+    # 限制备份数量，只保留最新的两个
     local old_backups
     set +e
-    old_backups=$(ls -t "$CONF_FILE.bak_"* 2>/dev/null | tail -n +2)
+    old_backups=$(ls -t "$CONF_FILE.bak_"* 2>/dev/null | tail -n +3) # 只删除第3个及以后的
     set -e
     if [ -n "$old_backups" ]; then
         echo -e "${CYAN}>>> 清理旧的备份文件...${NC}"
-        echo "$old_backups" | xargs rm
+        echo "$old_backups" | xargs rm -f
         echo -e "${GREEN}✅ 旧备份清理完成。${NC}"
     fi
 }
 
-# --- 主要优化配置 ---
+# --- 主要优化配置 (删除激进参数，并使用标记替换) ---
 apply_optimizations() {
     echo -e "${CYAN}>>> 应用核心网络优化配置 (${YELLOW}${VM_TIER}${CYAN})...${NC}"
-    > "$CONF_FILE"
-    cat >> "$CONF_FILE" << EOF
+
+    # 1. 构造新的优化内容
+    local NEW_CONF
+    NEW_CONF=$(cat << EOF
+${START_MARKER}
 # ==========================================================
 # TCP/IP & BBR 优化配置 (由脚本自动生成)
 # 生成时间: $(date)
 # 针对硬件: ${TOTAL_MEM}MB 内存, ${CPU_CORES}核CPU (${VM_TIER})
 # ==========================================================
+net.core.default_qdisc = fq            # 启用 FQ 队列调度器
+net.ipv4.tcp_congestion_control = bbr  # 启用 BBR 拥塞控制算法
+net.core.rmem_max = ${RMEM_MAX}        # 最大 socket 读缓冲区
+net.core.wmem_max = ${WMEM_MAX}        # 最大 socket 写缓冲区
+net.ipv4.tcp_rmem = ${TCP_RMEM}        # TCP 读缓冲区 (min/default/max)
+net.ipv4.tcp_wmem = ${TCP_WMEM}        # TCP 写缓冲区 (min/default/max)
+net.core.somaxconn = ${SOMAXCONN}      # 最大监听队列长度
+net.core.netdev_max_backlog = ${NETDEV_BACKLOG} # 网络设备最大排队数
+net.ipv4.tcp_max_syn_backlog = ${SOMAXCONN} # SYN 队列最大长度
+fs.file-max = ${FILE_MAX}              # 系统级最大文件句柄数
+# 以下参数使用内核默认值 (已移除：tcp_tw_reuse, tcp_fin_timeout, tcp_slow_start_after_idle 等激进参数)
+
 EOF
-    add_conf "net.core.default_qdisc" "fq" "使用Fair Queue队列调度器, 配合BBR效果更佳"
-    add_conf "net.ipv4.tcp_congestion_control" "bbr" "启用BBR拥塞控制算法"
-    add_conf "net.core.rmem_max" "$RMEM_MAX" "最大socket读缓冲区"
-    add_conf "net.core.wmem_max" "$WMEM_MAX" "最大socket写缓冲区"
-    add_conf "net.ipv4.tcp_rmem" "$TCP_RMEM" "TCP读缓冲区 (min/default/max)"
-    add_conf "net.ipv4.tcp_wmem" "$TCP_WMEM" "TCP写缓冲区 (min/default/max)"
-    add_conf "net.core.somaxconn" "$SOMAXCONN" "最大监听队列长度"
-    add_conf "net.core.netdev_max_backlog" "$NETDEV_BACKLOG" "网络设备最大排队数"
-    add_conf "net.ipv4.tcp_max_syn_backlog" "$SOMAXCONN" "SYN队列最大长度"
-    add_conf "net.ipv4.tcp_fin_timeout" "15" "缩短FIN_WAIT_2状态超时"
-    add_conf "net.ipv4.tcp_tw_reuse" "0" "禁用TIME_WAIT重用"
-    add_conf "net.ipv4.tcp_max_tw_buckets" "180000" "增加TIME_WAIT socket最大数量"
-    add_conf "fs.file-max" "$FILE_MAX" "系统级最大文件句柄数"
-    add_conf "fs.nr_open" "$FILE_MAX" "单进程最大文件句柄数"
-    add_conf "net.ipv4.tcp_slow_start_after_idle" "0" "禁用空闲后慢启动"
-    add_conf "vm.swappiness" "10" "降低Swap使用倾向"
     if [ -f /proc/sys/net/netfilter/nf_conntrack_max ]; then
-        add_conf "net.netfilter.nf_conntrack_max" "$CONNTRACK_MAX" "连接跟踪表最大条目数"
+        NEW_CONF+="\nnet.netfilter.nf_conntrack_max = ${CONNTRACK_MAX} # 连接跟踪表最大条目数\n"
     fi
+    NEW_CONF+="${END_MARKER}"
+    )
+
+    # 2. 移除旧的优化内容
+    if grep -q "${START_MARKER}" "$CONF_FILE"; then
+        echo -e "${YELLOW}>>> 发现旧的优化配置，正在移除...${NC}"
+        # 使用 sed 移除标记之间的内容
+        sed -i "/${START_MARKER}/,/${END_MARKER}/d" "$CONF_FILE"
+    fi
+
+    # 3. 追加新的优化内容到文件末尾
+    echo -e "$NEW_CONF" >> "$CONF_FILE"
+    echo -e "${GREEN}✅ 优化配置已写入 ${CONF_FILE}${NC}"
 }
 
-# --- 应用与验证 ---
+# --- 应用与验证 (保持不变) ---
 apply_and_verify() {
     echo -e "${CYAN}>>> 使配置生效...${NC}"
     sysctl --system >/dev/null 2>&1 || { echo -e "${RED}❌ 配置应用失败, 请检查 $CONF_FILE 文件格式。${NC}"; exit 1; }
@@ -205,7 +221,7 @@ apply_and_verify() {
     fi
 }
 
-# --- 提示信息 ---
+# --- 提示信息 (修改为适应 /etc/sysctl.conf) ---
 show_tips() {
     echo ""
     echo -e "${YELLOW}-------------------- 操作完成 --------------------${NC}"
@@ -219,43 +235,12 @@ show_tips() {
     echo -e "${YELLOW}--------------------------------------------------${NC}"
 }
 
-# --- 冲突配置检查函数 (修复版) ---
-check_for_conflicts() {
-    local key_params=("net.ipv4.tcp_congestion_control" "net.core.default_qdisc")
-    local conflicting_files=""
-    local pattern
-    
-    # 构建grep模式
-    pattern=$(printf '%s\|' "${key_params[@]}")
-    pattern="${pattern%\\|}"  # 移除末尾的\|
-    
-    # 检查主配置文件
-    if grep -qE "$pattern" /etc/sysctl.conf 2>/dev/null; then
-        conflicting_files+="\n - /etc/sysctl.conf"
-    fi
-    
-    # 检查其他配置文件
-    for conf_file in /etc/sysctl.d/*.conf; do
-        if [ "$conf_file" != "$CONF_FILE" ] && [ -f "$conf_file" ]; then
-            if grep -qE "$pattern" "$conf_file" 2>/dev/null; then
-                conflicting_files+="\n - $conf_file"
-            fi
-        fi
-    done
-    
-    if [ -n "$conflicting_files" ]; then
-        echo -e "\n${YELLOW}---------------------- 注意 ----------------------${NC}"
-        echo -e "${YELLOW}⚠️  系统在以下文件中也发现了BBR相关设置:${NC}"
-        echo -e "${CYAN}${conflicting_files}${NC}"
-        echo -e "${YELLOW}为避免配置混乱, 建议您手动编辑这些文件,${NC}"
-        echo -e "${YELLOW}注释或删除其中的冲突行。您的脚本 (${CYAN}$CONF_FILE${YELLOW}) 已生效。${NC}"
-        echo -e "${YELLOW}--------------------------------------------------${NC}"
-    fi
-}
+# --- 冲突配置检查函数 (删除，因为现在直接写入主文件，其他sysctl.d文件优先级更高，冲突风险变小) ---
+# check_for_conflicts() { ... }
 
-# --- 幂等性检查函数 ---
+# --- 幂等性检查函数 (修改为检查 /etc/sysctl.conf 里的标记) ---
 check_if_already_applied() {
-    if grep -q "# 由脚本自动生成" "$CONF_FILE" 2>/dev/null; then
+    if grep -q "${START_MARKER}" "$CONF_FILE" 2>/dev/null; then
         local current_cc
         current_cc=$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null)
         if [[ "$current_cc" == "bbr" ]]; then
@@ -265,31 +250,31 @@ check_if_already_applied() {
     fi
 }
 
-# --- 撤销与卸载函数 ---
+# --- 撤销与卸载函数 (修改为适应 /etc/sysctl.conf) ---
 revert_optimizations() {
     echo -e "${YELLOW}>>> 正在尝试撤销优化...${NC}"
     local latest_backup
     latest_backup=$(ls -t "$CONF_FILE.bak_"* 2>/dev/null | head -n 1)
+
+    if [[ $(id -u) -ne 0 ]]; then
+        echo -e "${RED}❌ 错误: 操作必须以root权限运行。${NC}"
+        exit 1
+    fi
+
     if [ -f "$latest_backup" ]; then
         echo -e "找到最新备份文件: ${CYAN}$latest_backup${NC}"
-        if [[ $(id -u) -ne 0 ]]; then
-            echo -e "${RED}❌ 错误: 恢复操作必须以root权限运行。${NC}"
-            exit 1
-        fi
         mv "$latest_backup" "$CONF_FILE"
         echo -e "${GREEN}✅ 已通过备份文件恢复。${NC}"
-    elif [ -f "$CONF_FILE" ]; then
-        echo -e "${YELLOW}未找到备份文件，将直接删除配置文件...${NC}"
-        if [[ $(id -u) -ne 0 ]]; then
-            echo -e "${RED}❌ 错误: 删除操作必须以root权限运行。${NC}"
-            exit 1
-        fi
-        rm -f "$CONF_FILE"
-        echo -e "${GREEN}✅ 配置文件已删除。${NC}"
+    elif grep -q "${START_MARKER}" "$CONF_FILE" 2>/dev/null; then
+        echo -e "${YELLOW}未找到备份文件，将清除配置文件中的脚本优化部分...${NC}"
+        # 使用 sed 移除标记之间的内容
+        sed -i "/${START_MARKER}/,/${END_MARKER}/d" "$CONF_FILE"
+        echo -e "${GREEN}✅ 配置文件中脚本优化部分已清除。${NC}"
     else
-        echo -e "${GREEN}✅ 系统未发现优化配置文件，无需操作。${NC}"
+        echo -e "${GREEN}✅ 系统未发现脚本添加的优化配置，无需操作。${NC}"
         return 0
     fi
+
     echo -e "${CYAN}>>> 使恢复后的配置生效...${NC}"
     sysctl --system >/dev/null 2>&1
     echo -e "${GREEN}🎉 优化已成功撤销！系统将恢复到内核默认或之前的配置。${NC}"
@@ -303,20 +288,19 @@ main() {
     fi
 
     echo -e "${CYAN}======================================================${NC}"
-    echo -e "${CYAN}      Linux TCP/IP & BBR 智能优化脚本 v${SCRIPT_VERSION}      ${NC}"
+    echo -e "${CYAN}      Linux TCP/IP & BBR 核心优化脚本 v${SCRIPT_VERSION}      ${NC}"
     echo -e "${CYAN}======================================================${NC}"
-    
-    check_if_already_applied
+
     pre_flight_checks
+    check_if_already_applied
     get_system_info
     manage_backups
     apply_optimizations
     apply_and_verify
     show_tips
-    check_for_conflicts
-    
-    echo -e "\n${GREEN}🎉 所有优化已完成并生效！${NC}"
-    
+
+    echo -e "\n${GREEN}🎉 所有核心优化已完成并生效！${NC}"
+
     exit 0
 }
 

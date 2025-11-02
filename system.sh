@@ -148,7 +148,7 @@ bbr_menu() {
                 ;;
             2)
                 echo "正在应用BBR优化配置 ⚙️..."
-                bash <(curl -fsSL https://raw.githubusercontent.com/Lanlan13-14/System-Easy/refs/heads/main/bbr-optimization.sh)
+                bash <(curl -sL https://raw.githubusercontent.com/yahuisme/network-optimization/main/script.sh)
                 if [ $? -eq 0 ]; then
                     echo "BBR优化配置已应用 🎉"
                     echo "当前TCP拥塞控制算法：$(sysctl -n net.ipv4.tcp_congestion_control)"

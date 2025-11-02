@@ -13,3 +13,5 @@ sudo system-easy
 
 ### 特别感谢
 [byJoey](https://github.com/byJoey/Actions-bbr-v3)
+>
+[qichiyu](https://github.com/qichiyuhub/autoshell)

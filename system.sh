@@ -1121,7 +1121,7 @@ while true; do
     echo "14. 设置系统定时重启 🔄"
     echo "15. Cron任务管理 ⏰"
     echo "16. SWAP管理 💾"
-    echo "17. TCP Fast Open (TFO) 管理 🚀" # 新增菜单项
+    echo "17. TCP Fast Open (TFO) 管理 🚀"
     echo "18. 退出 🚪"
     read -p "请输入您的选择： " main_choice
     case $main_choice in

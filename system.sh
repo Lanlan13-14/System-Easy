@@ -47,14 +47,15 @@ log_cleanup_menu() {
         esac
     done
 }
-# 功能3：BBR管理子菜单 ⚡
 bbr_menu() {
     while true; do
         echo "BBR管理菜单 ⚡："
         echo "1. 安装BBR v3 🚀"
         echo "2. BBR调优 ⚙️"
         echo "3. 卸载BBR 🗑️"
-        echo "4. 返回主菜单 🔙"
+        echo "4. 还原备份 🔄"
+        echo "5. 重置BBR 🔄"
+        echo "6. 返回主菜单 🔙"
         read -p "请输入您的选择： " choice
         case $choice in
             1)
@@ -70,7 +71,7 @@ bbr_menu() {
                 ;;
             2)
                 echo "正在应用BBR优化配置 ⚙️..."
-                bash <(curl -sL "https://raw.githubusercontent.com/qichiyuhub/autoshell/refs/heads/main/optimize.sh")
+                bash -c "$(curl -fsSL https://raw.githubusercontent.com/Lanlan13-14/System-Easy/refs/heads/main/bbr.sh)"
                 if sysctl -p && sysctl --system; then
                     echo "BBR优化配置已应用 🎉"
                     echo "当前TCP拥塞控制算法：$(sysctl -n net.ipv4.tcp_congestion_control)"
@@ -106,6 +107,77 @@ bbr_menu() {
                 read
                 ;;
             4)
+                echo "正在还原备份 🔄..."
+                BACKUP_DIR="/etc/sysctl_backup"
+                echo "可用备份列表："
+                if ls "$BACKUP_DIR"/*.tar.gz >/dev/null 2>&1; then
+                    ls -1 "$BACKUP_DIR"/*.tar.gz | sort
+                else
+                    echo "无可用备份"
+                fi
+                echo
+                read -p "请输入要还原的备份文件名 (包括完整路径): " backup_file
+                if [ ! -f "$backup_file" ]; then
+                    echo "错误: 文件不存在！"
+                    echo "按回车键返回菜单 🔙"
+                    read
+                    continue
+                fi
+                # 备份当前配置
+                timestamp=$(date '+%Y%m%d_%H%M%S')
+                mkdir -p "$BACKUP_DIR/manual_before_restore_${timestamp}"
+                cp -a /etc/sysctl.d "$BACKUP_DIR/manual_before_restore_${timestamp}/" 2>/dev/null || true
+                # 删除当前配置并还原
+                rm -rf /etc/sysctl.d/*
+                if tar -xzf "$backup_file" -C /etc; then
+                    # 应用 sysctl
+                    if sysctl --system; then
+                        echo "✅ 还原完成: $backup_file"
+                    else
+                        echo "sysctl 应用失败，请手动运行 'sysctl --system' 😔"
+                    fi
+                else
+                    echo "还原失败，请检查备份文件 😔"
+                fi
+                echo "按回车键返回菜单 🔙"
+                read
+                ;;
+            5)
+                echo "正在重置BBR 🔄..."
+                # 删除 /etc/sysctl.d/ 下所有包含 BBR 相关关键词的文件
+                if [ -d /etc/sysctl.d ]; then
+                    deleted_count=0
+                    for file in /etc/sysctl.d/*.conf; do
+                        if [ -f "$file" ]; then
+                            if grep -q -E "(tcp_bbr|bbr|fq|net\.ipv4\.tcp_congestion_control|net\.core\.default_qdisc)" "$file" 2>/dev/null; then
+                                rm -f "$file"
+                                deleted_count=$((deleted_count + 1))
+                            fi
+                        fi
+                    done
+                    if [ $deleted_count -gt 0 ]; then
+                        echo "已删除 $deleted_count 个 BBR 相关配置文件 ✅"
+                    else
+                        echo "未找到 BBR 相关配置文件 ✅"
+                    fi
+                fi
+                # 重置 /etc/sysctl.conf 到默认（移除 BBR 相关行并设置 cubic）
+                cp /etc/sysctl.conf /etc/sysctl.conf.bak.$(date '+%Y%m%d_%H%M%S') 2>/dev/null || true
+                sed -i '/net\.core\.default_qdisc/d' /etc/sysctl.conf
+                sed -i '/net\.ipv4\.tcp_congestion_control/d' /etc/sysctl.conf
+                if ! grep -q "net.ipv4.tcp_congestion_control=cubic" /etc/sysctl.conf 2>/dev/null; then
+                    echo "net.ipv4.tcp_congestion_control=cubic" >> /etc/sysctl.conf
+                fi
+                if sysctl -p && sysctl --system; then
+                    echo "BBR 已重置到默认配置（cubic） 🎉"
+                    echo "当前TCP拥塞控制算法：$(sysctl -n net.ipv4.tcp_congestion_control)"
+                else
+                    echo "重置配置失败，请检查 /etc/sysctl.conf 😔"
+                fi
+                echo "按回车键返回菜单 🔙"
+                read
+                ;;
+            6)
                 return
                 ;;
             *)

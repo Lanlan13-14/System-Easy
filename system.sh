@@ -82,8 +82,7 @@ bbr_menu() {
                 fi
             done
         fi
-
-        # 确保 /etc/sysctl.d 目录存在
+        # 确保目录存在
         mkdir -p /etc/sysctl.d
     }
 
@@ -114,17 +113,13 @@ bbr_menu() {
             2)
                 echo "应用BBR优化配置 ⚙️..."
                 if ! sysctl net.ipv4.tcp_available_congestion_control >/dev/null 2>&1; then
-                    echo "⚠️ 当前内核不支持 BBR，调优无法执行"
+                    echo "⚠️ 当前内核不支持 BBR"
                     read -p "按回车返回菜单 🔙"
                     continue
                 fi
                 if ! check_bbr_loaded; then
                     echo "检测到 BBR 模块未加载，正在尝试加载..."
-                    if ! modprobe tcp_bbr 2>/dev/null; then
-                        echo "⚠️ BBR模块加载失败"
-                        read -p "按回车返回菜单 🔙"
-                        continue
-                    fi
+                    modprobe tcp_bbr 2>/dev/null || echo "⚠️ 模块加载失败"
                 fi
                 bash -c "$(curl -fsSL https://raw.githubusercontent.com/Lanlan13-14/System-Easy/refs/heads/main/bbr.sh)"
                 apply_sysctl
@@ -153,7 +148,7 @@ bbr_menu() {
                 fi
                 echo "可用备份列表:"
                 for i in "${!backups[@]}"; do
-                    echo "$((i+1))) ${backups[$i]}"
+                    echo "[$((i+1))] ${backups[$i]}"
                 done
                 read -p "请输入备份编号: " idx
                 if ! [[ "$idx" =~ ^[0-9]+$ ]] || [ -z "${backups[$((idx-1))]}" ]; then
@@ -172,7 +167,7 @@ bbr_menu() {
                     apply_sysctl
                     echo "✅ 还原完成: $backup_file"
                 else
-                    echo "❌ 还原失败，请检查备份文件"
+                    echo "❌ 还原失败"
                 fi
                 read -p "按回车返回菜单 🔙"
                 ;;
@@ -197,14 +192,23 @@ bbr_menu() {
                 fi
                 echo "可用备份列表:"
                 for i in "${!backups[@]}"; do
-                    echo "$((i+1))) ${backups[$i]}"
+                    echo "[$((i+1))] ${backups[$i]}"
                 done
-                read -p "请输入要删除的备份编号(输入0取消): " del_idx
-                if [[ "$del_idx" =~ ^[0-9]+$ ]] && [ "$del_idx" -gt 0 ] && [ "$del_idx" -le "${#backups[@]}" ]; then
-                    rm -f "${backups[$((del_idx-1))]}"
-                    echo "✅ 备份已删除"
+                echo "[0] 删除全部备份"
+                read -p "请输入要删除的备份编号（输入0删除全部，其他数字删除单个，回车取消）: " del_idx
+
+                if [[ "$del_idx" =~ ^[0-9]+$ ]]; then
+                    if [ "$del_idx" -eq 0 ]; then
+                        rm -f "$BBR_BACKUP_DIR"/*.tar.gz
+                        echo "✅ 已删除所有备份"
+                    elif [ "$del_idx" -ge 1 ] && [ "$del_idx" -le "${#backups[@]}" ]; then
+                        rm -f "${backups[$((del_idx-1))]}"
+                        echo "✅ 已删除备份: ${backups[$((del_idx-1))]}"
+                    else
+                        echo "⚠️ 无效编号，操作取消"
+                    fi
                 else
-                    echo "操作已取消或编号无效"
+                    echo "操作取消"
                 fi
                 read -p "按回车返回菜单 🔙"
                 ;;

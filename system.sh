@@ -74,7 +74,7 @@ bbr_menu() {
                 bash -c "$(curl -fsSL https://raw.githubusercontent.com/Lanlan13-14/System-Easy/refs/heads/main/bbr.sh)"
                 if sysctl -p && sysctl --system; then
                     echo "BBR优化配置已应用 🎉"
-                    echo "当前TCP拥塞控制算法：$(sysctl -n net.ipv4.tcp_congestion_control)"
+                    echo "当前TCP拥塞控制算法：$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || echo '未支持')"
                 else
                     echo "BBR优化配置应用失败，请检查 /etc/sysctl.conf 😔"
                 fi
@@ -96,10 +96,12 @@ bbr_menu() {
                 # 恢复默认TCP拥塞控制
                 sed -i '/net\.core\.default_qdisc/d' /etc/sysctl.conf
                 sed -i '/net\.ipv4\.tcp_congestion_control/d' /etc/sysctl.conf
-                echo "net.ipv4.tcp_congestion_control=cubic" >> /etc/sysctl.conf
+                if sysctl net.ipv4.tcp_congestion_control >/dev/null 2>&1; then
+                    echo "net.ipv4.tcp_congestion_control=cubic" >> /etc/sysctl.conf
+                fi
                 if sysctl -p && sysctl --system; then
                     echo "已恢复默认TCP拥塞控制（cubic） 🎉"
-                    echo "当前TCP拥塞控制算法：$(sysctl -n net.ipv4.tcp_congestion_control)"
+                    echo "当前TCP拥塞控制算法：$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || echo '未支持')"
                 else
                     echo "恢复默认配置失败，请检查 /etc/sysctl.conf 😔"
                 fi
@@ -161,16 +163,18 @@ bbr_menu() {
                         echo "未找到 BBR 相关配置文件 ✅"
                     fi
                 fi
-                # 重置 /etc/sysctl.conf 到默认（移除 BBR 相关行并设置 cubic）
+                # 重置 /etc/sysctl.conf 到默认（移除 BBR 相关行并设置 cubic 如果支持）
                 cp /etc/sysctl.conf /etc/sysctl.conf.bak.$(date '+%Y%m%d_%H%M%S') 2>/dev/null || true
                 sed -i '/net\.core\.default_qdisc/d' /etc/sysctl.conf
                 sed -i '/net\.ipv4\.tcp_congestion_control/d' /etc/sysctl.conf
-                if ! grep -q "net.ipv4.tcp_congestion_control=cubic" /etc/sysctl.conf 2>/dev/null; then
-                    echo "net.ipv4.tcp_congestion_control=cubic" >> /etc/sysctl.conf
+                if sysctl net.ipv4.tcp_congestion_control >/dev/null 2>&1; then
+                    if ! grep -q "net.ipv4.tcp_congestion_control=cubic" /etc/sysctl.conf 2>/dev/null; then
+                        echo "net.ipv4.tcp_congestion_control=cubic" >> /etc/sysctl.conf
+                    fi
                 fi
                 if sysctl -p && sysctl --system; then
                     echo "BBR 已重置到默认配置（cubic） 🎉"
-                    echo "当前TCP拥塞控制算法：$(sysctl -n net.ipv4.tcp_congestion_control)"
+                    echo "当前TCP拥塞控制算法：$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || echo '未支持')"
                 else
                     echo "重置配置失败，请检查 /etc/sysctl.conf 😔"
                 fi

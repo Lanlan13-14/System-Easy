@@ -48,159 +48,171 @@ log_cleanup_menu() {
     done
 }
 bbr_menu() {
+    BBR_BACKUP_DIR="/etc/sysctl_backup"
+
+    # --- 辅助函数 ---
+    check_bbr_loaded() {
+        lsmod | grep -q tcp_bbr
+    }
+
+    apply_sysctl() {
+        sysctl --system >/dev/null 2>&1 || true
+    }
+
+    restore_default_tcp() {
+        sed -i '/net\.core\.default_qdisc/d' /etc/sysctl.conf
+        sed -i '/net\.ipv4\.tcp_congestion_control/d' /etc/sysctl.conf
+        if sysctl net.ipv4.tcp_congestion_control >/dev/null 2>&1; then
+            if ! grep -q '^net\.ipv4\.tcp_congestion_control=cubic' /etc/sysctl.conf 2>/dev/null; then
+                echo "net.ipv4.tcp_congestion_control=cubic" >> /etc/sysctl.conf
+            fi
+        else
+            sed -i '/^ *net\.ipv4\.tcp_congestion_control/ s/^/# /' /etc/sysctl.conf
+        fi
+        apply_sysctl
+    }
+
+    reset_sysctl_d_defaults() {
+        # 删除 BBR 相关配置文件
+        if [ -d /etc/sysctl.d ]; then
+            for file in /etc/sysctl.d/*.conf; do
+                [ -f "$file" ] || continue
+                if grep -q -E "(tcp_bbr|bbr|fq|net\.ipv4\.tcp_congestion_control|net\.core\.default_qdisc)" "$file" 2>/dev/null; then
+                    rm -f "$file"
+                fi
+            done
+        fi
+
+        # 确保 /etc/sysctl.d 目录存在
+        mkdir -p /etc/sysctl.d
+    }
+
+    # --- 主菜单 ---
     while true; do
-        echo "BBR管理菜单 ⚡："
+        clear
+        echo "================ BBR管理菜单 ⚡ ================"
         echo "1. 安装BBR v3 🚀"
-        echo "2. BBR调优 ⚙️"
+        echo "2. 应用BBR优化 ⚙️"
         echo "3. 卸载BBR 🗑️"
-        echo "4. 还原备份 🔄"
-        echo "5. 重置BBR 🔄"
-        echo "6. 返回主菜单 🔙"
-        read -p "请输入您的选择： " choice
+        echo "4. 恢复备份 🔄"
+        echo "5. 重置BBR配置 🔄"
+        echo "6. 备份管理 🗂️"
+        echo "7. 返回主菜单 🔙"
+        echo "=============================================="
+        read -p "请输入您的选择: " choice
         case $choice in
             1)
                 echo "正在安装BBR v3内核 ⏳..."
-                echo "注意：安装完成后，请手动输入 'system-easy' 返回面板以继续操作 ❗"
                 bash <(curl -L -s https://raw.githubusercontent.com/byJoey/Actions-bbr-v3/refs/heads/main/install.sh)
-                if lsmod | grep -q tcp_bbr; then
-                    echo "BBR v3内核安装成功 🎉 请运行 'system-easy' 返回面板以调优或管理BBR。"
+                if check_bbr_loaded; then
+                    echo "✅ BBR v3内核安装成功"
                 else
-                    echo "BBR v3安装失败，请检查网络或日志 😔"
+                    echo "❌ BBR安装失败"
                 fi
-                return
+                read -p "按回车返回菜单 🔙"
                 ;;
             2)
-                echo "正在应用BBR优化配置 ⚙️..."
-                bash -c "$(curl -fsSL https://raw.githubusercontent.com/Lanlan13-14/System-Easy/refs/heads/main/bbr.sh)"
-                sysctl -p
-                sysctl --system
-                echo "BBR优化配置已应用 🎉"
-                echo "当前TCP拥塞控制算法：$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || echo '未支持')"
-                echo "按回车键返回菜单 🔙"
-                read
-                ;;
-            3)
-                echo "正在卸载BBR 🗑️..."
-                if lsmod | grep -q tcp_bbr; then
-                    rmmod tcp_bbr 2>/dev/null
-                    if ! lsmod | grep -q tcp_bbr; then
-                        echo "BBR模块已移除 ✅"
-                    else
-                        echo "无法移除BBR模块，可能被内核占用 😔"
-                    fi
-                else
-                    echo "未检测到BBR模块，无需移除 ✅"
-                fi
-                # 恢复默认TCP拥塞控制
-                sed -i '/net\.core\.default_qdisc/d' /etc/sysctl.conf
-                sed -i '/net\.ipv4\.tcp_congestion_control/d' /etc/sysctl.conf
-                supported=false
-                if sysctl net.ipv4.tcp_congestion_control >/dev/null 2>&1; then
-                    supported=true
-                    if ! grep -q '^net\.ipv4\.tcp_congestion_control=cubic' /etc/sysctl.conf 2>/dev/null; then
-                        echo "net.ipv4.tcp_congestion_control=cubic" >> /etc/sysctl.conf
-                    fi
-                else
-                    # 如果不支持，强制注释残留行
-                    sed -i '/^ *net\.ipv4\.tcp_congestion_control/ s/^/# /' /etc/sysctl.conf
-                fi
-                sysctl -p
-                sysctl --system
-                if [ $? -eq 0 ]; then
-                    echo "已恢复默认TCP拥塞控制（cubic） 🎉"
-                else
-                    echo "部分配置应用成功，忽略不支持的参数 🎉"
-                fi
-                echo "当前TCP拥塞控制算法：$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || echo '未支持')"
-                echo "按回车键返回菜单 🔙"
-                read
-                ;;
-            4)
-                echo "正在还原备份 🔄..."
-                BACKUP_DIR="/etc/sysctl_backup"
-                echo "可用备份列表："
-                if ls "$BACKUP_DIR"/*.tar.gz >/dev/null 2>&1; then
-                    ls -1 "$BACKUP_DIR"/*.tar.gz | sort
-                else
-                    echo "无可用备份"
-                fi
-                echo
-                read -p "请输入要还原的备份文件名 (包括完整路径): " backup_file
-                if [ ! -f "$backup_file" ]; then
-                    echo "错误: 文件不存在！"
-                    echo "按回车键返回菜单 🔙"
-                    read
+                echo "应用BBR优化配置 ⚙️..."
+                if ! sysctl net.ipv4.tcp_available_congestion_control >/dev/null 2>&1; then
+                    echo "⚠️ 当前内核不支持 BBR，调优无法执行"
+                    read -p "按回车返回菜单 🔙"
                     continue
                 fi
-                # 备份当前配置
-                timestamp=$(date '+%Y%m%d_%H%M%S')
-                mkdir -p "$BACKUP_DIR/manual_before_restore_${timestamp}"
-                cp -a /etc/sysctl.d "$BACKUP_DIR/manual_before_restore_${timestamp}/" 2>/dev/null || true
-                # 删除当前配置并还原
+                if ! check_bbr_loaded; then
+                    echo "检测到 BBR 模块未加载，正在尝试加载..."
+                    if ! modprobe tcp_bbr 2>/dev/null; then
+                        echo "⚠️ BBR模块加载失败"
+                        read -p "按回车返回菜单 🔙"
+                        continue
+                    fi
+                fi
+                bash -c "$(curl -fsSL https://raw.githubusercontent.com/Lanlan13-14/System-Easy/refs/heads/main/bbr.sh)"
+                apply_sysctl
+                echo "✅ BBR优化配置已应用"
+                echo "当前TCP拥塞控制算法: $(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || echo '未支持')"
+                read -p "按回车返回菜单 🔙"
+                ;;
+            3)
+                echo "卸载BBR 🗑️..."
+                if check_bbr_loaded; then
+                    rmmod tcp_bbr 2>/dev/null && echo "✅ BBR模块已移除" || echo "⚠️ 无法移除BBR模块"
+                else
+                    echo "BBR模块未加载，无需卸载 ✅"
+                fi
+                restore_default_tcp
+                read -p "按回车返回菜单 🔙"
+                ;;
+            4)
+                echo "恢复备份 🔄"
+                mkdir -p "$BBR_BACKUP_DIR"
+                mapfile -t backups < <(ls "$BBR_BACKUP_DIR"/*.tar.gz 2>/dev/null)
+                if [ ${#backups[@]} -eq 0 ]; then
+                    echo "⚠️ 无可用备份"
+                    read -p "按回车返回菜单 🔙"
+                    continue
+                fi
+                echo "可用备份列表:"
+                for i in "${!backups[@]}"; do
+                    echo "$((i+1))) ${backups[$i]}"
+                done
+                read -p "请输入备份编号: " idx
+                if ! [[ "$idx" =~ ^[0-9]+$ ]] || [ -z "${backups[$((idx-1))]}" ]; then
+                    echo "❌ 无效编号"
+                    read -p "按回车返回菜单 🔙"
+                    continue
+                fi
+                backup_file="${backups[$((idx-1))]}"
+                echo "正在还原 $backup_file ..."
+                if ! check_bbr_loaded; then
+                    echo "检测到 BBR 模块未加载，正在尝试加载..."
+                    modprobe tcp_bbr 2>/dev/null || true
+                fi
                 rm -rf /etc/sysctl.d/*
                 if tar -xzf "$backup_file" -C /etc; then
-                    # 应用 sysctl
-                    sysctl --system
-                    if [ $? -eq 0 ]; then
-                        echo "✅ 还原完成: $backup_file"
-                    else
-                        echo "sysctl 应用失败（可能有不支持参数），请手动运行 'sysctl --system' 😔"
-                    fi
+                    apply_sysctl
+                    echo "✅ 还原完成: $backup_file"
                 else
-                    echo "还原失败，请检查备份文件 😔"
+                    echo "❌ 还原失败，请检查备份文件"
                 fi
-                echo "按回车键返回菜单 🔙"
-                read
+                read -p "按回车返回菜单 🔙"
                 ;;
             5)
-                echo "正在重置BBR 🔄..."
-                # 删除 /etc/sysctl.d/ 下所有包含 BBR 相关关键词的文件
-                if [ -d /etc/sysctl.d ]; then
-                    deleted_count=0
-                    for file in /etc/sysctl.d/*.conf; do
-                        if [ -f "$file" ]; then
-                            if grep -q -E "(tcp_bbr|bbr|fq|net\.ipv4\.tcp_congestion_control|net\.core\.default_qdisc)" "$file" 2>/dev/null; then
-                                rm -f "$file"
-                                deleted_count=$((deleted_count + 1))
-                            fi
-                        fi
-                    done
-                    if [ $deleted_count -gt 0 ]; then
-                        echo "已删除 $deleted_count 个 BBR 相关配置文件 ✅"
-                    else
-                        echo "未找到 BBR 相关配置文件 ✅"
-                    fi
+                echo "重置BBR配置 🔄..."
+                reset_sysctl_d_defaults
+                if check_bbr_loaded; then
+                    rmmod tcp_bbr 2>/dev/null || true
                 fi
-                # 重置 /etc/sysctl.conf 到默认（移除 BBR 相关行并设置 cubic 如果支持）
-                cp /etc/sysctl.conf /etc/sysctl.conf.bak.$(date '+%Y%m%d_%H%M%S') 2>/dev/null || true
-                sed -i '/net\.core\.default_qdisc/d' /etc/sysctl.conf
-                sed -i '/net\.ipv4\.tcp_congestion_control/d' /etc/sysctl.conf
-                supported=false
-                if sysctl net.ipv4.tcp_congestion_control >/dev/null 2>&1; then
-                    supported=true
-                    if ! grep -q '^net\.ipv4\.tcp_congestion_control=cubic' /etc/sysctl.conf 2>/dev/null; then
-                        echo "net.ipv4.tcp_congestion_control=cubic" >> /etc/sysctl.conf
-                    fi
-                else
-                    # 如果不支持，强制注释残留行
-                    sed -i '/^ *net\.ipv4\.tcp_congestion_control/ s/^/# /' /etc/sysctl.conf
-                fi
-                sysctl -p
-                sysctl --system
-                if [ $? -eq 0 ]; then
-                    echo "BBR 已重置到默认配置（cubic） 🎉"
-                else
-                    echo "部分配置应用成功，忽略不支持的参数 🎉"
-                fi
-                echo "当前TCP拥塞控制算法：$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || echo '未支持')"
-                echo "按回车键返回菜单 🔙"
-                read
+                restore_default_tcp
+                echo "✅ BBR已重置到默认配置（cubic）"
+                read -p "按回车返回菜单 🔙"
                 ;;
             6)
+                echo "备份管理 🗂️"
+                mkdir -p "$BBR_BACKUP_DIR"
+                mapfile -t backups < <(ls "$BBR_BACKUP_DIR"/*.tar.gz 2>/dev/null)
+                if [ ${#backups[@]} -eq 0 ]; then
+                    echo "⚠️ 无可用备份"
+                    read -p "按回车返回菜单 🔙"
+                    continue
+                fi
+                echo "可用备份列表:"
+                for i in "${!backups[@]}"; do
+                    echo "$((i+1))) ${backups[$i]}"
+                done
+                read -p "请输入要删除的备份编号(输入0取消): " del_idx
+                if [[ "$del_idx" =~ ^[0-9]+$ ]] && [ "$del_idx" -gt 0 ] && [ "$del_idx" -le "${#backups[@]}" ]; then
+                    rm -f "${backups[$((del_idx-1))]}"
+                    echo "✅ 备份已删除"
+                else
+                    echo "操作已取消或编号无效"
+                fi
+                read -p "按回车返回菜单 🔙"
+                ;;
+            7)
                 return
                 ;;
             *)
-                echo "无效选择，请重试 😕"
+                echo "❌ 无效选择，请重试"
                 ;;
         esac
     done

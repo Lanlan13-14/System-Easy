@@ -18,7 +18,9 @@ fi
 SYSCTL_DIR="/etc/sysctl.d"
 LIMITS_CONF_FILE="/etc/security/limits.d/99-custom-limits.conf"
 TEMP_SYSCTL_FILE=$(mktemp)
-BACKUP_DIR="${SYSCTL_DIR}_backup_$(date '+%Y%m%d_%H%M%S')"
+BACKUP_BASE_DIR="/etc/sysctl_backup"
+TIMESTAMP=$(date '+%Y%m%d_%H%M%S')
+BACKUP_FILE="${BACKUP_BASE_DIR}/sysctl_backup_${TIMESTAMP}.tar.gz"
 
 # 定义用于管理配置块的标记
 SYSCTL_MARKER_START="# --- BEGIN Kernel Tuning by Script ---"
@@ -37,13 +39,25 @@ apply_sysctl_value() {
 }
 
 # --- 目录与备份逻辑 ---
+# 确保 sysctl 目录存在
 if [ ! -d "$SYSCTL_DIR" ]; then
     echo "未检测到 $SYSCTL_DIR，正在创建..."
     mkdir -p "$SYSCTL_DIR"
 fi
 
-echo "正在备份 $SYSCTL_DIR 到 $BACKUP_DIR ..."
-cp -a "$SYSCTL_DIR" "$BACKUP_DIR"
+# 确保备份存放目录存在
+BACKUP_BASE_DIR="/etc/sysctl_backup"
+mkdir -p "$BACKUP_BASE_DIR"
+
+# 定义压缩备份文件名
+TIMESTAMP=$(date '+%Y%m%d_%H%M%S')
+BACKUP_FILE="${BACKUP_BASE_DIR}/sysctl_backup_${TIMESTAMP}.tar.gz"
+
+# 进行压缩备份
+echo "正在备份 $SYSCTL_DIR 到压缩文件 $BACKUP_FILE ..."
+tar -czf "$BACKUP_FILE" -C /etc sysctl.d
+
+echo "✅ 备份完成: $BACKUP_FILE"
 
 # --- 清理重复或旧的 BBR 优化配置 ---
 echo "正在清理旧的 BBR 优化配置文件..."

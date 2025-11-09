@@ -10,7 +10,7 @@ sudo system-easy
 ```
 ### 3. 卸载
 ##### 卸载选项在脚本中已提供
-### 仅bbr优化
+#### 仅bbr优化
 ```
 bash <(curl -fsSL https://raw.githubusercontent.com/Lanlan13-14/System-Easy/refs/heads/main/bbr.sh)
 ```

@@ -2,7 +2,7 @@
 #### 快速管理Debian/Ubuntu系统
 ### 1. 安装
 ```
-curl -L https://raw.githubusercontent.com/Lanlan13-14/Gre-Easy/refs/heads/main/gre.sh -o /tmp/gre-easy && chmod +x /tmp/gre-easy && sudo mv /tmp/gre-easy /usr/local/bin/gre-easy && sudo gre-easy
+curl -L https://raw.githubusercontent.com/Lanlan13-14/System-Easy/refs/heads/main/system.sh -o /tmp/system-easy && chmod +x /tmp/system-easy && sudo mv /tmp/system-easy /usr/local/bin/system-easy && system-easy
 ```
 ### 2. 已安装？执行
 ```

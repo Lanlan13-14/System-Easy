@@ -127,8 +127,9 @@ sysctl_values=(
     ["net.core.wmem_max"]="$tcp_buf"
     ["net.core.rmem_default"]="16777216"
     ["net.core.wmem_default"]="16777216"
+    # ✅ 修改上下行默认值对称
     ["net.ipv4.tcp_rmem"]="4096 87380 $tcp_buf"
-    ["net.ipv4.tcp_wmem"]="4096 65536 $tcp_buf"
+    ["net.ipv4.tcp_wmem"]="4096 87380 $tcp_buf"
 
     # TCP 行为优化（控制抖动、提高稳定性）
     ["net.ipv4.tcp_fin_timeout"]="30"

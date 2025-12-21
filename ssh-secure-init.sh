@@ -135,6 +135,17 @@ disable_password() {
     echo "🔒 SSH 密码登录已禁用"
 }
 
+enable_password() {
+    cp "$SSH_CONFIG" "$BACKUP"
+
+    sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication yes/' "$SSH_CONFIG"
+    sed -i 's/^#\?ChallengeResponseAuthentication.*/ChallengeResponseAuthentication yes/' "$SSH_CONFIG"
+
+    systemctl restart sshd
+    echo "🔓 SSH 密码登录已开启（应急）"
+    echo "⚠️ 建议仅临时使用，用完请及时关闭"
+}
+
 # ================= 菜单 =================
 
 menu() {
@@ -149,7 +160,8 @@ menu() {
 [3] 🧾 直接打印 SSH 私钥（兜底/高危）
 [4] 🔄 重置 SSH 密钥（泄漏应急）
 [5] 🔧 修改 SSH 端口
-[6] 🚫 禁用 SSH 密码登录（确认后再用）
+[6] 🚫 禁用 SSH 密码登录
+[7] 🔓 启用 SSH 密码登录（应急）
 [0] ❌ 退出
 
 EOF
@@ -159,7 +171,7 @@ EOF
 
 while true; do
     menu
-    read -rp "请选择 [0-6]: " choice
+    read -rp "请选择 [0-7]: " choice
     case "$choice" in
         1) ensure_key; pause ;;
         2) temp_key_server; pause ;;
@@ -167,6 +179,7 @@ while true; do
         4) reset_key; pause ;;
         5) change_ssh_port; pause ;;
         6) disable_password; pause ;;
+        7) enable_password; pause ;;
         0) exit 0 ;;
         *) echo "⚠️ 无效选项"; pause ;;
     esac

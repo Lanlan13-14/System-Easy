@@ -9,6 +9,8 @@ KEY_FILE="$KEY_DIR/id_rsa"
 PUB_FILE="$KEY_FILE.pub"
 AUTHORIZED="$KEY_DIR/authorized_keys"
 
+# ================= 工具函数 =================
+
 random_port() {
     shuf -i 20000-60000 -n 1
 }
@@ -20,6 +22,16 @@ get_ip() {
 pause() {
     read -rp "💡 按回车继续..."
 }
+
+ensure_nc() {
+    if ! command -v nc >/dev/null 2>&1; then
+        echo "📦 未检测到 netcat，正在安装..."
+        apt update
+        apt install -y netcat-openbsd
+    fi
+}
+
+# ================= SSH 密钥 =================
 
 ensure_key() {
     mkdir -p "$KEY_DIR"
@@ -38,15 +50,18 @@ ensure_key() {
     echo "✅ SSH 密钥已就绪"
 }
 
+# ================= 临时密钥分发 =================
+
 temp_key_server() {
     ensure_key
+    ensure_nc
 
     REMOTE_PORT=$(random_port)
     LOCAL_PORT=$(random_port)
     SERVER_IP=$(get_ip)
 
     echo
-    echo "🖥️ 启动【仅本地监听】临时密钥服务（60 秒）"
+    echo "🖥️ 启动【仅本地监听】临时密钥服务"
     echo "🔗 服务器监听: 127.0.0.1:$REMOTE_PORT"
     echo "🔗 客户端本地端口: 127.0.0.1:$LOCAL_PORT"
     echo "⏳ 有效期: 60 秒"
@@ -64,7 +79,7 @@ temp_key_server() {
     cat <<EOF
 =================【客户端执行】=================
 
-🔹 复制执行命令：
+🔹 复制并执行：
 
 ssh -L 127.0.0.1:$LOCAL_PORT:127.0.0.1:$REMOTE_PORT root@$SERVER_IP
 
@@ -79,6 +94,8 @@ http://127.0.0.1:$LOCAL_PORT
 ===============================================
 EOF
 }
+
+# ================= SSH 配置 =================
 
 change_ssh_port() {
     NEW_PORT=$(random_port)
@@ -106,6 +123,8 @@ disable_password() {
     echo "⚠️ 请确认你已经可以用密钥登录"
 }
 
+# ================= 密钥应急 =================
+
 reset_key() {
     echo
     echo "⚠️ 警告：重置密钥将使所有旧密钥失效"
@@ -117,6 +136,8 @@ reset_key() {
 
     echo "✅ SSH 密钥已重置"
 }
+
+# ================= 菜单 =================
 
 menu() {
     clear
@@ -135,6 +156,8 @@ menu() {
 
 EOF
 }
+
+# ================= 主循环 =================
 
 while true; do
     menu

@@ -338,17 +338,17 @@ ssh_port_menu() {
 change_ssh_password() {
     echo "生成一个20位复杂密码 🔐..."
     # 生成复杂密码，包含大小写字母、数字、特殊字符
-    new_pass=$(cat /dev/urandom | tr -dc 'a-zA-Z0-9!@#$%^&*()_+' | head -c 20)
+    new_pass=$(cat /dev/urandom | tr -dc 'a-zA-Z0-9!@#%^&*()_+' | head -c 20)
     # 确保密码包含至少1个大写字母、1个小写字母、1个数字、1个特殊字符
     while true; do
         has_upper=$(echo "$new_pass" | grep -q '[A-Z]' && echo "yes" || echo "no")
         has_lower=$(echo "$new_pass" | grep -q '[a-z]' && echo "yes" || echo "no")
         has_digit=$(echo "$new_pass" | grep -q '[0-9]' && echo "yes" || echo "no")
-        has_special=$(echo "$new_pass" | grep -q '[!@#$%^&*()_+]' && echo "yes" || echo "no")
+        has_special=$(echo "$new_pass" | grep -q '[!@#%^&*()_+]' && echo "yes" || echo "no")
         if [ "$has_upper" = "yes" ] && [ "$has_lower" = "yes" ] && [ "$has_digit" = "yes" ] && [ "$has_special" = "yes" ]; then
             break
         fi
-        new_pass=$(cat /dev/urandom | tr -dc 'a-zA-Z0-9!@#$%^&*()_+' | head -c 20)
+        new_pass=$(cat /dev/urandom | tr -dc 'a-zA-Z0-9!@#%^&*()_+' | head -c 20)
     done
     echo "生成的密码：$new_pass"
     echo "警告：修改后，仅新密码可用于登录，旧密码将失效 ❗"
@@ -374,14 +374,24 @@ change_ssh_password() {
         echo "您可以尝试手动修改密码：sudo passwd root"
     fi
 }
-# 功能8：卸载脚本 🗑️
+# 功能8：SSH密钥登录管理 🔑
+ssh_key_management() {
+    echo "正在拉取并执行SSH安全初始化脚本 ⏳..."
+    bash <(curl -sL https://raw.githubusercontent.com/Lanlan13-14/System-Easy/refs/heads/main/ssh-secure-init.sh)
+    if [ $? -eq 0 ]; then
+        echo "SSH密钥登录管理完成 🎉"
+    else
+        echo "执行失败，请检查网络或脚本URL 😔"
+    fi
+}
+# 功能9：卸载脚本 🗑️
 uninstall_script() {
     echo "正在卸载脚本（仅删除脚本本身） 🗑️..."
     rm -f "$0"
     echo "脚本已删除，即将退出 🚪"
     exit 0
 }
-# 功能9：设置系统时区与时间同步 ⏰
+# 功能10：设置系统时区与时间同步 ⏰
 set_timezone() {
     while true; do
         echo "系统时区与时间同步管理菜单 ⏰："
@@ -615,7 +625,7 @@ EOF
         esac
     done
 }
-# 功能10：更新脚本 📥
+# 功能11：更新脚本 📥
 update_script() {
     echo "正在更新脚本 📥..."
     # 备份当前脚本
@@ -649,7 +659,7 @@ update_script() {
         exec /usr/local/bin/system-easy
     fi
 }
-# 功能11：查看端口占用 🔍
+# 功能12：查看端口占用 🔍
 check_port_usage() {
     read -p "请输入要检查的端口号： " port
     if ! [[ "$port" =~ ^[0-9]+$ ]] || [ "$port" -lt 1 ] || [ "$port" -gt 65535 ]; then
@@ -738,7 +748,7 @@ check_port_usage() {
         esac
     done
 }
-# 功能12：查看内存占用最大程序 💾
+# 功能13：查看内存占用最大程序 💾
 check_memory_usage() {
     echo "内存占用最大的5个进程 💾："
     ps -eo pid,ppid,cmd,%mem --sort=-%mem | head -n 6
@@ -797,7 +807,7 @@ check_memory_usage() {
         esac
     done
 }
-# 功能13：查看CPU占用最大程序 🖥️
+# 功能14：查看CPU占用最大程序 🖥️
 check_cpu_usage() {
     echo "CPU占用最大的5个进程 🖥️："
     ps -eo pid,ppid,cmd,%cpu --sort=-%cpu | head -n 6
@@ -856,7 +866,7 @@ check_cpu_usage() {
         esac
     done
 }
-# 功能14：设置系统定时重启 🔄
+# 功能15：设置系统定时重启 🔄
 set_system_reboot() {
     while true; do
         echo "系统定时重启菜单 🔄："
@@ -938,7 +948,7 @@ set_system_reboot() {
         esac
     done
 }
-# 功能15：Cron任务管理 ⏰
+# 功能16：Cron任务管理 ⏰
 cron_task_menu() {
     # 检查是否安装cron，如果没有，自动安装
     if ! command -v crontab >/dev/null; then
@@ -1064,7 +1074,7 @@ cron_task_menu() {
         esac
     done
 }
-# 功能16：SWAP管理 💾
+# 功能17：SWAP管理 💾
 swap_menu() {
     while true; do
         echo "SWAP管理菜单 💾："
@@ -1141,7 +1151,7 @@ swap_menu() {
         esac
     done
 }
-# 新增功能17：TCP Fast Open (TFO) 管理子菜单 🚀
+# 新增功能18：TCP Fast Open (TFO) 管理子菜单 🚀
 tfo_menu() {
     while true; do
         echo "TCP Fast Open (TFO) 管理菜单 🚀："
@@ -1219,17 +1229,18 @@ while true; do
     echo "5. 修改主机名 🖥️"
     echo "6. SSH端口管理 🔒"
     echo "7. 修改SSH密码 🔑"
-    echo "8. 卸载脚本 🗑️"
-    echo "9. 设置系统时区与时间同步 ⏰"
-    echo "10. 更新脚本 📥"
-    echo "11. 查看端口占用 🔍"
-    echo "12. 查看内存占用最大程序 💾"
-    echo "13. 查看CPU占用最大程序 🖥️"
-    echo "14. 设置系统定时重启 🔄"
-    echo "15. Cron任务管理 ⏰"
-    echo "16. SWAP管理 💾"
-    echo "17. TCP Fast Open (TFO) 管理 🚀"
-    echo "18. 退出 🚪"
+    echo "8. SSH密钥登录管理 🔑"
+    echo "9. 卸载脚本 🗑️"
+    echo "10. 设置系统时区与时间同步 ⏰"
+    echo "11. 更新脚本 📥"
+    echo "12. 查看端口占用 🔍"
+    echo "13. 查看内存占用最大程序 💾"
+    echo "14. 查看CPU占用最大程序 🖥️"
+    echo "15. 设置系统定时重启 🔄"
+    echo "16. Cron任务管理 ⏰"
+    echo "17. SWAP管理 💾"
+    echo "18. TCP Fast Open (TFO) 管理 🚀"
+    echo "19. 退出 🚪"
     read -p "请输入您的选择： " main_choice
     case $main_choice in
         1) install_tools ;;
@@ -1239,17 +1250,18 @@ while true; do
         5) change_hostname ;;
         6) ssh_port_menu ;;
         7) change_ssh_password ;;
-        8) uninstall_script ;;
-        9) set_timezone ;;
-        10) update_script ;;
-        11) check_port_usage ;;
-        12) check_memory_usage ;;
-        13) check_cpu_usage ;;
-        14) set_system_reboot ;;
-        15) cron_task_menu ;;
-        16) swap_menu ;;
-        17) tfo_menu ;;
-        18)
+        8) ssh_key_management ;;
+        9) uninstall_script ;;
+        10) set_timezone ;;
+        11) update_script ;;
+        12) check_port_usage ;;
+        13) check_memory_usage ;;
+        14) check_cpu_usage ;;
+        15) set_system_reboot ;;
+        16) cron_task_menu ;;
+        17) swap_menu ;;
+        18) tfo_menu ;;
+        19)
             echo "👋 已退出，⚡ 下次使用直接运行: sudo system-easy"
             exit 0
             ;;

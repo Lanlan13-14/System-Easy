@@ -1,5 +1,6 @@
 #!/bin/bash
 set -e
+set -o pipefail
 
 SSH_CONFIG="/etc/ssh/sshd_config"
 BACKUP="/etc/ssh/sshd_config.bak"
@@ -31,6 +32,25 @@ ensure_nc() {
     fi
 }
 
+# ✅ 获取当前 SSH 实际端口（核心新增）
+get_ssh_port() {
+    # 1️⃣ 优先从当前 SSH 会话获取（最准确）
+    if [[ -n "$SSH_CONNECTION" ]]; then
+        echo "$SSH_CONNECTION" | awk '{print $4}'
+        return
+    fi
+
+    # 2️⃣ 从 sshd_config 读取
+    if grep -qiE '^[[:space:]]*Port[[:space:]]+' "$SSH_CONFIG"; then
+        grep -iE '^[[:space:]]*Port[[:space:]]+' "$SSH_CONFIG" \
+            | tail -n1 | awk '{print $2}'
+        return
+    fi
+
+    # 3️⃣ 兜底
+    echo 22
+}
+
 # ================= SSH 密钥 =================
 
 ensure_key() {
@@ -52,7 +72,17 @@ ensure_key() {
     echo "📍 公钥位置: $PUB_FILE"
 }
 
-# ================= 临时密钥分发（首选） =================
+reset_key() {
+    echo "⚠️ 即将重置 SSH 密钥（泄漏应急）"
+    read -rp "确认请输入 yes: " c
+    [[ "$c" == "yes" ]] || return
+
+    rm -f "$KEY_FILE" "$PUB_FILE" "$AUTHORIZED"
+    ensure_key
+    echo "🔄 SSH 密钥已重置"
+}
+
+# ================= 临时密钥分发（端口转发） =================
 
 temp_key_server() {
     ensure_key
@@ -61,11 +91,13 @@ temp_key_server() {
     REMOTE_PORT=$(random_port)
     LOCAL_PORT=$(random_port)
     SERVER_IP=$(get_ip)
+    SSH_PORT=$(get_ssh_port)
 
     echo
     echo "🖥️ 启动【仅本地监听】临时密钥服务"
     echo "🔗 服务器监听: 127.0.0.1:$REMOTE_PORT"
     echo "🔗 客户端本地端口: 127.0.0.1:$LOCAL_PORT"
+    echo "🔐 当前 SSH 端口: $SSH_PORT"
     echo "⏳ 有效期: 60 秒"
     echo
 
@@ -81,7 +113,9 @@ temp_key_server() {
     cat <<EOF
 =================【客户端执行】=================
 
-ssh -L 127.0.0.1:$LOCAL_PORT:127.0.0.1:$REMOTE_PORT root@$SERVER_IP
+ssh -p $SSH_PORT \\
+    -L 127.0.0.1:$LOCAL_PORT:127.0.0.1:$REMOTE_PORT \\
+    root@$SERVER_IP
 
 浏览器访问：
 http://127.0.0.1:$LOCAL_PORT
@@ -90,7 +124,7 @@ http://127.0.0.1:$LOCAL_PORT
 EOF
 }
 
-# ================= 兜底：直接打印私钥 =================
+# ================= 高危兜底 =================
 
 print_private_key() {
     ensure_key
@@ -122,6 +156,7 @@ change_ssh_port() {
     systemctl restart sshd
 
     echo "✅ SSH 端口已修改为: $NEW_PORT"
+    echo "⚠️ 请确保你已获取私钥再断开连接"
 }
 
 disable_password() {
@@ -143,7 +178,6 @@ enable_password() {
 
     systemctl restart sshd
     echo "🔓 SSH 密码登录已开启（应急）"
-    echo "⚠️ 建议仅临时使用，用完请及时关闭"
 }
 
 # ================= 菜单 =================
@@ -160,7 +194,7 @@ menu() {
 [3] 🧾 直接打印 SSH 私钥（兜底/高危）
 [4] 🔄 重置 SSH 密钥（泄漏应急）
 [5] 🔧 修改 SSH 端口
-[6] 🚫 禁用 SSH 密码登录（确认后再用）
+[6] 🚫 禁用 SSH 密码登录
 [7] 🔓 启用 SSH 密码登录（应急）
 [0] ❌ 退出
 

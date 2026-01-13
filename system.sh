@@ -47,6 +47,7 @@ log_cleanup_menu() {
         esac
     done
 }
+# bbr管理
 bbr_menu() {
     BBR_BACKUP_DIR="/etc/sysctl_backup"
 
@@ -72,18 +73,27 @@ bbr_menu() {
         apply_sysctl
     }
 
+    # 🔥 优化后的清理函数
     reset_sysctl_d_defaults() {
-        # 删除 BBR 相关配置文件
+        echo "🔄 正在彻底清理 sysctl 配置..."
+
+        # 1. 清空 /etc/sysctl.d（保留目录）
         if [ -d /etc/sysctl.d ]; then
-            for file in /etc/sysctl.d/*.conf; do
-                [ -f "$file" ] || continue
-                if grep -q -E "(tcp_bbr|bbr|fq|net\.ipv4\.tcp_congestion_control|net\.core\.default_qdisc)" "$file" 2>/dev/null; then
-                    rm -f "$file"
-                fi
-            done
+            find /etc/sysctl.d -type f -name '*.conf' -delete
+        else
+            mkdir -p /etc/sysctl.d
         fi
-        # 确保目录存在
-        mkdir -p /etc/sysctl.d
+
+        # 2. 清空 sysctl.conf（保留文件）
+        : > /etc/sysctl.conf
+
+        # 3. 卸载 BBR 模块（如已加载）
+        if check_bbr_loaded; then
+            rmmod tcp_bbr 2>/dev/null || true
+        fi
+
+        # 4. 重新加载系统默认 sysctl
+        sysctl --system >/dev/null 2>&1 || true
     }
 
     # --- 主菜单 ---
@@ -158,10 +168,6 @@ bbr_menu() {
                 fi
                 backup_file="${backups[$((idx-1))]}"
                 echo "正在还原 $backup_file ..."
-                if ! check_bbr_loaded; then
-                    echo "检测到 BBR 模块未加载，正在尝试加载..."
-                    modprobe tcp_bbr 2>/dev/null || true
-                fi
                 rm -rf /etc/sysctl.d/*
                 if tar -xzf "$backup_file" -C /etc; then
                     apply_sysctl
@@ -174,11 +180,7 @@ bbr_menu() {
             5)
                 echo "重置BBR配置 🔄..."
                 reset_sysctl_d_defaults
-                if check_bbr_loaded; then
-                    rmmod tcp_bbr 2>/dev/null || true
-                fi
-                restore_default_tcp
-                echo "✅ BBR已重置到默认配置（cubic）"
+                echo "✅ BBR已彻底重置为系统默认（cubic）"
                 read -p "按回车返回菜单 🔙"
                 ;;
             6)
@@ -195,8 +197,7 @@ bbr_menu() {
                     echo "[$((i+1))] ${backups[$i]}"
                 done
                 echo "[0] 删除全部备份"
-                read -p "请输入要删除的备份编号（输入0删除全部，其他数字删除单个，回车取消）: " del_idx
-
+                read -p "请输入要删除的备份编号: " del_idx
                 if [[ "$del_idx" =~ ^[0-9]+$ ]]; then
                     if [ "$del_idx" -eq 0 ]; then
                         rm -f "$BBR_BACKUP_DIR"/*.tar.gz
@@ -205,10 +206,8 @@ bbr_menu() {
                         rm -f "${backups[$((del_idx-1))]}"
                         echo "✅ 已删除备份: ${backups[$((del_idx-1))]}"
                     else
-                        echo "⚠️ 无效编号，操作取消"
+                        echo "⚠️ 无效编号"
                     fi
-                else
-                    echo "操作取消"
                 fi
                 read -p "按回车返回菜单 🔙"
                 ;;
@@ -216,7 +215,7 @@ bbr_menu() {
                 return
                 ;;
             *)
-                echo "❌ 无效选择，请重试"
+                echo "❌ 无效选择"
                 ;;
         esac
     done

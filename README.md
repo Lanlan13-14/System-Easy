@@ -14,6 +14,10 @@ sudo system-easy
 ```
 bash <(curl -fsSL https://raw.githubusercontent.com/Lanlan13-14/System-Easy/refs/heads/main/bbr.sh)
 ```
+#### 卸载bbr优化
+```
+bash <(curl -fsSL https://raw.githubusercontent.com/Lanlan13-14/System-Easy/refs/heads/main/remove-bbr-tuning.sh)
+```
 ### 特别感谢
 [byJoey](https://github.com/byJoey/Actions-bbr-v3)
 >

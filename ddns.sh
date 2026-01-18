@@ -761,15 +761,15 @@ service_menu() {
 main_menu() {
     while true; do
         echo "DDNS 管理菜单 📋："
-        echo "1. 安装 / 部署 DDNS 🛠️"
-        echo "2. 凭据管理 🔐"
-        echo "3. 域名管理 🌐"
-        echo "4. 手动执行一次更新 ⏱️"
-        echo "5. 查看日志与上次更新时间 📜"
-        echo "6. 服务管理 ⚙️"
-        echo "7. 更改全局运行间隔（分钟） ⏲️"
-        echo "8. 卸载 DDNS（脚本与数据）🗑️"
-        echo "9. 退出 🚪"
+        echo "[1] 安装 / 部署 DDNS 🛠️"
+        echo "[2] 凭据管理 🔐"
+        echo "[3] 域名管理 🌐"
+        echo "[4] 手动执行一次更新 ⏱️"
+        echo "[5] 查看日志与上次更新时间 📜"
+        echo "[6] 服务管理 ⚙️"
+        echo "[7] 更改全局运行间隔（分钟） ⏲️"
+        echo "[8] 卸载 DDNS（脚本与数据）🗑️"
+        echo "[9] 退出 🚪"
         read -p "请输入您的选择： " main_choice
 
         case $main_choice in

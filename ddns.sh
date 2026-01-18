@@ -757,24 +757,22 @@ service_menu() {
     done
 }
 
-# 主菜单（左对齐美化）
+# 主菜单
 main_menu() {
     while true; do
-        load_config
-        echo -e "${BLUE}DDNS 管理脚本 - 交互式版${NC}"
-        echo -e "----------------------------------------"
-        echo -e "  [1] 安装/部署 DDNS 🛠️"
-        echo -e "  [2] 凭据管理 🔐"
-        echo -e "  [3] 域名管理 🌐"
-        echo -e "  [4] 手动执行一次更新 ⏱️"
-        echo -e "  [5] 查看日志与上次更新时间 📜"
-        echo -e "  [6] 服务管理 ⚙️"
-        echo -e "  [7] 更改全局运行间隔（分钟） ⏲️"
-        echo -e "  [8] 卸载 DDNS（脚本与数据）🧹"
-        echo -e "  [0] 退出"
-        echo -e "----------------------------------------"
-        read -rp "选项: " opt
-        case "$opt" in
+        echo "DDNS 管理菜单 📋："
+        echo "1. 安装 / 部署 DDNS 🛠️"
+        echo "2. 凭据管理 🔐"
+        echo "3. 域名管理 🌐"
+        echo "4. 手动执行一次更新 ⏱️"
+        echo "5. 查看日志与上次更新时间 📜"
+        echo "6. 服务管理 ⚙️"
+        echo "7. 更改全局运行间隔（分钟） ⏲️"
+        echo "8. 卸载 DDNS（脚本与数据）🗑️"
+        echo "9. 退出 🚪"
+        read -p "请输入您的选择： " main_choice
+
+        case $main_choice in
             1) install_ddns ;;
             2) credentials_menu ;;
             3) domains_menu ;;
@@ -786,21 +784,23 @@ main_menu() {
             6) service_menu ;;
             7) set_interval ;;
             8)
-                read -rp "确认卸载并移除所有文件？(y/n): " yn
+                read -p "确认卸载并移除所有文件？(y/n): " yn
                 if [[ "$yn" =~ ^[Yy]$ ]]; then
                     uninstall_ddns_all
                 else
                     echo "已取消卸载"
                 fi
                 ;;
-            0)
-                echo -e "${GREEN}✅ 已退出。下次可输入 ${BLUE}ddns-easy${NC}${GREEN} 呼出脚本。记得回来哦！✨${NC}"
+            9)
+                echo "👋 已退出，⚡ 下次使用直接运行: ddns-easy"
                 exit 0
                 ;;
-            *) echo -e "${Error}无效选项，请重试。" ;;
+            *)
+                echo "无效选择，请重试 😕"
+                ;;
         esac
+
         echo
-        read -rp "按回车返回主菜单..." _
     done
 }
 

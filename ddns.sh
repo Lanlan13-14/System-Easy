@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# DDNS 管理脚本 - 完整修复版（Debian/Ubuntu 专用）
+# DDNS 管理脚本
 # 功能要点：
 # - Provider: cloudflare(实现API) aliyun tencent huawei（优先 CLI）
 # - 域名格式：domain|provider|type|on|interval（interval 单位：分钟）

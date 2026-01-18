@@ -6,7 +6,7 @@
 # - 域名交互式添加（provider/type/interval）
 # - 每条域名支持独立 interval（分钟）
 # - 左对齐美化标题与菜单，带 emoji
-# - 安装时创建 /usr/local/bin/ddns-easy 快捷命令
+# - 安装时创建 /usr/local/bin/ddns-easy 快捷命令（可用一行安装）
 # - 卸载时移除快捷命令
 #
 set -euo pipefail
@@ -25,6 +25,7 @@ LAST_UPDATE_FILE="${BASE_DIR}/last_update"
 LAST_RUNS_FILE="${BASE_DIR}/last_runs"
 CURRENT_IP_FILE="${BASE_DIR}/current_ip"
 ALIAS_PATH="/usr/local/bin/ddns-easy"
+LAUNCHER_PATH="${BASE_DIR}/ddns_manager_main.sh"
 
 # 检查 root
 if [[ $(id -u) -ne 0 ]]; then
@@ -50,6 +51,7 @@ if [ ! -f "${CONFIG_FILE}" ]; then
 # DDNS 配置文件（由脚本管理，请勿手动修改）
 # Cloudflare token 存放：cloudflare_api_token="..."
 # Aliyun/Tencent/Huawei 凭据由脚本交互式写入
+# 域名行格式：domain|provider|type|on|interval
 EOF
     chmod 600 "${CONFIG_FILE}"
 fi
@@ -63,7 +65,7 @@ log() {
     echo -e "${ts} ${level} ${msg}" | tee -a "${LOG_FILE}"
 }
 
-# 读取配置（仅导出凭据变量）
+# 读取配置并加载域名行
 load_config() {
     # shellcheck disable=SC1090
     source "${CONFIG_FILE}" 2>/dev/null || true
@@ -74,10 +76,9 @@ load_config() {
     done < "${CONFIG_FILE}"
 }
 
-# 保存凭据到 config（覆盖或追加）
+# 保存/删除键值到 config
 save_config_kv() {
     local key="$1"; local val="$2"
-    # 删除旧行
     if grep -qE "^${key}=" "${CONFIG_FILE}" 2>/dev/null; then
         sed -i "s|^${key}=.*|${key}=\"${val}\"|" "${CONFIG_FILE}"
     else
@@ -85,8 +86,6 @@ save_config_kv() {
     fi
     chmod 600 "${CONFIG_FILE}"
 }
-
-# 删除凭据键
 delete_config_key() {
     local key="$1"
     sed -i "/^${key}=/d" "${CONFIG_FILE}" 2>/dev/null || true
@@ -138,49 +137,25 @@ provider_install() {
     fi
     case "$provider" in
         aliyun)
-            if command -v apt >/dev/null 2>&1; then
-                apt install -y python3-pip -y >/dev/null 2>&1 || true
-            fi
-            if command -v pip3 >/dev/null 2>&1; then
-                pip3 install --upgrade aliyun-cli >/dev/null 2>&1 || true
-            fi
-            if command -v aliyun >/dev/null 2>&1; then
-                log "[INFO]" "Aliyun CLI 安装成功 ✅"
-            else
-                log "[WARN]" "Aliyun CLI 未检测到，请手动安装或检查 pip 输出。"
-            fi
+            if command -v apt >/dev/null 2>&1; then apt install -y python3-pip -y >/dev/null 2>&1 || true; fi
+            if command -v pip3 >/dev/null 2>&1; then pip3 install --upgrade aliyun-cli >/dev/null 2>&1 || true; fi
+            if command -v aliyun >/dev/null 2>&1; then log "[INFO] Aliyun CLI 安装成功 ✅"; else log "[WARN] Aliyun CLI 未检测到"; fi
             ;;
         tencent)
-            if command -v apt >/dev/null 2>&1; then
-                apt install -y python3-pip -y >/dev/null 2>&1 || true
-            fi
-            if command -v pip3 >/dev/null 2>&1; then
-                pip3 install --upgrade tccli tencentcloud-sdk-python >/dev/null 2>&1 || true
-            fi
-            if command -v tccli >/dev/null 2>&1 || command -v tencentcloud >/dev/null 2>&1; then
-                log "[INFO]" "Tencent CLI 安装成功 ✅"
-            else
-                log "[WARN]" "Tencent CLI 未检测到，请手动安装或检查 pip 输出。"
-            fi
+            if command -v apt >/dev/null 2>&1; then apt install -y python3-pip -y >/dev/null 2>&1 || true; fi
+            if command -v pip3 >/dev/null 2>&1; then pip3 install --upgrade tccli tencentcloud-sdk-python >/dev/null 2>&1 || true; fi
+            if command -v tccli >/dev/null 2>&1 || command -v tencentcloud >/dev/null 2>&1; then log "[INFO] Tencent CLI 安装成功 ✅"; else log "[WARN] Tencent CLI 未检测到"; fi
             ;;
         huawei)
-            if command -v apt >/dev/null 2>&1; then
-                apt install -y python3-pip -y >/dev/null 2>&1 || true
-            fi
-            if command -v pip3 >/dev/null 2>&1; then
-                pip3 install --upgrade huaweicloud-cli huaweicloudsdkcore >/dev/null 2>&1 || true
-            fi
-            if command -v huaweicloud >/dev/null 2>&1 || command -v hwcloud >/dev/null 2>&1; then
-                log "[INFO]" "Huawei CLI 安装成功 ✅"
-            else
-                log "[WARN]" "Huawei CLI 未检测到，请手动安装或检查 pip 输出。"
-            fi
+            if command -v apt >/dev/null 2>&1; then apt install -y python3-pip -y >/dev/null 2>&1 || true; fi
+            if command -v pip3 >/dev/null 2>&1; then pip3 install --upgrade huaweicloud-cli huaweicloudsdkcore >/dev/null 2>&1 || true; fi
+            if command -v huaweicloud >/dev/null 2>&1 || command -v hwcloud >/dev/null 2>&1; then log "[INFO] Huawei CLI 安装成功 ✅"; else log "[WARN] Huawei CLI 未检测到"; fi
             ;;
         cloudflare)
-            log "[INFO]" "Cloudflare 使用 API Token，无需强制安装 CLI。"
+            log "[INFO] Cloudflare 使用 API Token，无需强制安装 CLI。"
             ;;
         *)
-            log "[ERROR]" "未知 provider: ${provider}"
+            log "[ERROR] 未知 provider: ${provider}"
             ;;
     esac
 }
@@ -189,23 +164,13 @@ provider_uninstall() {
     local provider="$1"
     log "[INFO]" "尝试卸载 ${provider} CLI（pip 卸载尝试）..."
     case "$provider" in
-        aliyun)
-            if command -v pip3 >/dev/null 2>&1; then pip3 uninstall -y aliyun-cli >/dev/null 2>&1 || true; fi
-            ;;
-        tencent)
-            if command -v pip3 >/dev/null 2>&1; then pip3 uninstall -y tccli tencentcloud-sdk-python >/dev/null 2>&1 || true; fi
-            ;;
-        huawei)
-            if command -v pip3 >/dev/null 2>&1; then pip3 uninstall -y huaweicloud-cli huaweicloudsdkcore >/dev/null 2>&1 || true; fi
-            ;;
-        cloudflare)
-            log "[INFO]" "Cloudflare CLI 非必需，若安装请手动卸载。"
-            ;;
-        *)
-            log "[ERROR]" "未知 provider: ${provider}"
-            ;;
+        aliyun) if command -v pip3 >/dev/null 2>&1; then pip3 uninstall -y aliyun-cli >/dev/null 2>&1 || true; fi ;;
+        tencent) if command -v pip3 >/dev/null 2>&1; then pip3 uninstall -y tccli tencentcloud-sdk-python >/dev/null 2>&1 || true; fi ;;
+        huawei) if command -v pip3 >/dev/null 2>&1; then pip3 uninstall -y huaweicloud-cli huaweicloudsdkcore >/dev/null 2>&1 || true; fi ;;
+        cloudflare) log "[INFO] Cloudflare CLI 非必需，若安装请手动卸载。" ;;
+        *) log "[ERROR] 未知 provider: ${provider}" ;;
     esac
-    log "[INFO]" "卸载尝试完成，请检查是否仍存在对应命令。"
+    log "[INFO] 卸载尝试完成，请检查是否仍存在对应命令。"
 }
 
 # 更新单条记录（provider-specific）
@@ -218,7 +183,7 @@ update_record() {
     case "$provider" in
         cloudflare)
             if [ -z "${cloudflare_api_token:-}" ]; then
-                log "[WARN]" "Cloudflare token 未配置，跳过 ${domain}"
+                log "[WARN] Cloudflare token 未配置，跳过 ${domain}"
                 return 1
             fi
             local root zone_id dns_id payload res
@@ -227,7 +192,7 @@ update_record() {
                 -H "Authorization: Bearer ${cloudflare_api_token}" \
                 -H "Content-Type: application/json" | grep -Po '(?<="id":")[^"]*' | head -1)
             if [ -z "$zone_id" ]; then
-                log "[ERROR]" "Cloudflare: 无法获取 zone_id ${root}，跳过 ${domain}"
+                log "[ERROR] Cloudflare: 无法获取 zone_id ${root}，跳过 ${domain}"
                 return 1
             fi
             dns_id=$(curl -s -X GET "https://api.cloudflare.com/client/v4/zones/${zone_id}/dns_records?type=${rec_type}&name=${domain}" \
@@ -244,42 +209,42 @@ update_record() {
                     -H "Content-Type: application/json" --data "$payload")
             fi
             if echo "$res" | grep -q '"success":true'; then
-                log "[INFO]" "Cloudflare: ${domain} ${rec_type} -> ${ip}"
+                log "[INFO] Cloudflare: ${domain} ${rec_type} -> ${ip}"
                 return 0
             else
-                log "[ERROR]" "Cloudflare 更新失败: ${domain} ${rec_type} -> ${ip}"
+                log "[ERROR] Cloudflare 更新失败: ${domain} ${rec_type} -> ${ip}"
                 return 1
             fi
             ;;
         aliyun)
             if command -v aliyun >/dev/null 2>&1; then
-                log "[INFO]" "Aliyun CLI 存在，尝试通过 CLI 更新 ${domain} ${rec_type} -> ${ip}"
+                log "[INFO] Aliyun CLI 存在，尝试通过 CLI 更新 ${domain} ${rec_type} -> ${ip}"
                 return 0
             else
-                log "[WARN]" "Aliyun CLI 未安装，跳过 ${domain}"
+                log "[WARN] Aliyun CLI 未安装，跳过 ${domain}"
                 return 1
             fi
             ;;
         tencent)
             if command -v tccli >/dev/null 2>&1 || command -v tencentcloud >/dev/null 2>&1; then
-                log "[INFO]" "Tencent CLI 存在，尝试通过 CLI 更新 ${domain} ${rec_type} -> ${ip}"
+                log "[INFO] Tencent CLI 存在，尝试通过 CLI 更新 ${domain} ${rec_type} -> ${ip}"
                 return 0
             else
-                log "[WARN]" "Tencent CLI 未安装，跳过 ${domain}"
+                log "[WARN] Tencent CLI 未安装，跳过 ${domain}"
                 return 1
             fi
             ;;
         huawei)
             if command -v huaweicloud >/dev/null 2>&1 || command -v hwcloud >/dev/null 2>&1; then
-                log "[INFO]" "Huawei CLI 存在，尝试通过 CLI 更新 ${domain} ${rec_type} -> ${ip}"
+                log "[INFO] Huawei CLI 存在，尝试通过 CLI 更新 ${domain} ${rec_type} -> ${ip}"
                 return 0
             else
-                log "[WARN]" "Huawei CLI 未安装，跳过 ${domain}"
+                log "[WARN] Huawei CLI 未安装，跳过 ${domain}"
                 return 1
             fi
             ;;
         *)
-            log "[ERROR]" "未知 provider: ${provider}"
+            log "[ERROR] 未知 provider: ${provider}"
             return 1
             ;;
     esac
@@ -322,7 +287,7 @@ perform_update() {
         if ! [[ "$interval" =~ ^[0-9]+$ && "$interval" -ge 1 ]]; then interval=5; fi
 
         if [[ "${enabled,,}" != "on" ]]; then
-            log "[INFO]" "跳过已禁用：${domain}"
+            log "[INFO] 跳过已禁用：${domain}"
             continue
         fi
 
@@ -330,7 +295,7 @@ perform_update() {
         if [[ -z "$last_run" ]]; then last_run=0; fi
         elapsed=$(( now_ts - last_run ))
         if (( elapsed < interval * 60 )); then
-            log "[DEBUG]" "域名 ${domain} 距上次运行 ${elapsed}s (< ${interval}m)，跳过"
+            log "[DEBUG] 域名 ${domain} 距上次运行 ${elapsed}s (< ${interval}m)，跳过"
             continue
         fi
 
@@ -342,15 +307,15 @@ perform_update() {
                         summary+=" ${domain}(A:${current_ipv4})"
                         set_last_run_for_domain "$domain" "$now_ts"
                     else
-                        log "[WARN]" "更新 ${domain} A 记录失败"
+                        log "[WARN] 更新 ${domain} A 记录失败"
                         set_last_run_for_domain "$domain" "$now_ts"
                     fi
                 else
-                    log "[INFO]" "IPv4 未变化，跳过 ${domain} A"
+                    log "[INFO] IPv4 未变化，跳过 ${domain} A"
                     set_last_run_for_domain "$domain" "$now_ts"
                 fi
             else
-                log "[WARN]" "未获取到有效 IPv4，跳过 ${domain} A"
+                log "[WARN] 未获取到有效 IPv4，跳过 ${domain} A"
             fi
         fi
 
@@ -362,60 +327,63 @@ perform_update() {
                         summary+=" ${domain}(AAAA:${current_ipv6})"
                         set_last_run_for_domain "$domain" "$now_ts"
                     else
-                        log "[WARN]" "更新 ${domain} AAAA 记录失败"
+                        log "[WARN] 更新 ${domain} AAAA 记录失败"
                         set_last_run_for_domain "$domain" "$now_ts"
                     fi
                 else
-                    log "[INFO]" "IPv6 未变化，跳过 ${domain} AAAA"
+                    log "[INFO] IPv6 未变化，跳过 ${domain} AAAA"
                     set_last_run_for_domain "$domain" "$now_ts"
                 fi
             else
-                log "[WARN]" "未获取到有效 IPv6，跳过 ${domain} AAAA"
+                log "[WARN] 未获取到有效 IPv6，跳过 ${domain} AAAA"
             fi
         fi
     done
 
     if [ "$changed" = true ]; then
-        log "[INFO]" "DDNS 更新完成：${summary}"
+        log "[INFO] DDNS 更新完成：${summary}"
         save_last_update "更新成功：${summary}"
     else
-        log "[INFO]" "未检测到需要更新的记录（或全部跳过）。"
+        log "[INFO] 未检测到需要更新的记录（或全部跳过）。"
         save_last_update "无变化或全部跳过"
     fi
 }
 
-# 写入实际执行脚本
+# 写入实际执行脚本（被 systemd timer 调用）
 write_ddns_script() {
     cat > "${DDNS_SCRIPT}" <<'EOF'
 #!/bin/bash
 set -euo pipefail
-# 直接调用管理脚本中的 perform_update（通过 source）
-# shellcheck disable=SC1090
-source /etc/DDNS/config 2>/dev/null || true
-# 载入管理脚本函数并执行 perform_update
-bash -c "source /etc/DDNS/config 2>/dev/null || true; $(declare -f get_public_ip get_last_run_for_domain set_last_run_for_domain update_record load_config perform_update save_last_update) ; perform_update"
+# 载入配置并执行 perform_update（从主脚本复制的函数）
+# 为兼容性，直接调用 the launcher which is the main script copy
+exec /bin/bash /etc/DDNS/ddns_manager_main.sh --run-update
 EOF
     chmod +x "${DDNS_SCRIPT}"
 }
 
 # 安装基础工具（apt 优先）
 install_base_tools() {
-    log "[INFO]" "检查并安装基础工具（apt 优先）..."
+    log "[INFO] 检查并安装基础工具（apt 优先）..."
     if command -v apt >/dev/null 2>&1; then
         apt update -y >/dev/null 2>&1 || true
         apt install -y curl python3 python3-pip jq -y >/dev/null 2>&1 || true
-        log "[INFO]" "尝试通过 apt 安装基础工具（curl python3 python3-pip jq）"
+        log "[INFO] 尝试通过 apt 安装基础工具（curl python3 python3-pip jq）"
     else
-        log "[WARN]" "未检测到 apt，请手动确保 curl/python3/pip3/jq 已安装"
+        log "[WARN] 未检测到 apt，请手动确保 curl/python3/pip3/jq 已安装"
     fi
     if ! command -v pip3 >/dev/null 2>&1; then
-        log "[WARN]" "pip3 未检测到，某些 provider 安装可能需要 pip3，请手动安装"
+        log "[WARN] pip3 未检测到，某些 provider 安装可能需要 pip3，请手动安装"
     fi
 }
 
-# 安装 DDNS（写脚本并创建 systemd timer）
+# 安装 DDNS（写脚本并创建 systemd timer，创建 ddns-easy wrapper）
 install_ddns() {
     install_base_tools
+
+    # 写入主脚本副本（launcher）
+    cp "$0" "${LAUNCHER_PATH}"
+    chmod +x "${LAUNCHER_PATH}"
+
     write_ddns_script
 
     cat > /etc/systemd/system/ddns.service <<EOF
@@ -442,26 +410,19 @@ EOF
 
     systemctl daemon-reload
     systemctl enable --now ddns.timer >/dev/null 2>&1 || true
-    log "[INFO]" "已创建 systemd timer（每 1 分钟触发） ✅"
+    log "[INFO] 已创建 systemd timer（每 1 分钟触发） ✅"
 
-    # 创建 ddns-easy 快捷命令
+    # 创建 ddns-easy 快捷命令（wrapper）
     if [ ! -f "${ALIAS_PATH}" ]; then
         cat > "${ALIAS_PATH}" <<'EOF'
 #!/bin/bash
-exec /bin/bash /etc/DDNS/DDNS_MANAGER_LAUNCHER.sh "$@"
+exec /bin/bash /etc/DDNS/ddns_manager_main.sh "$@"
 EOF
         chmod +x "${ALIAS_PATH}"
-        # 写入 launcher 脚本（调用主脚本）
-        cat > /etc/DDNS/DDNS_MANAGER_LAUNCHER.sh <<'EOF'
-#!/bin/bash
-# 启动 ddns 管理脚本
-exec /bin/bash /etc/DDNS/ddns_manager_main.sh
-EOF
-        chmod +x /etc/DDNS/DDNS_MANAGER_LAUNCHER.sh
-        log "[INFO]" "已创建快捷命令：ddns-easy（可在任意位置输入呼出）"
+        log "[INFO] 已创建快捷命令：ddns-easy（可在任意位置输入呼出）"
     fi
 
-    log "[INFO]" "DDNS 安装/部署完成。"
+    log "[INFO] DDNS 安装/部署完成。"
 }
 
 # 卸载 DDNS（脚本与数据）
@@ -472,15 +433,13 @@ uninstall_ddns_all() {
     systemctl daemon-reload >/dev/null 2>&1 || true
     rm -rf "${BASE_DIR}" "${LOG_DIR}" || true
     if [ -f "${ALIAS_PATH}" ]; then rm -f "${ALIAS_PATH}"; fi
-    if [ -f /etc/DDNS/DDNS_MANAGER_LAUNCHER.sh ]; then rm -f /etc/DDNS/DDNS_MANAGER_LAUNCHER.sh; fi
-    log "[INFO]" "已卸载 DDNS（脚本与数据已移除）。"
+    log "[INFO] 已卸载 DDNS（脚本与数据已移除）。"
 }
 
 # 交互式凭据管理（Cloudflare / Aliyun / Tencent / Huawei）
 credentials_menu() {
     while true; do
         echo
-        # 左对齐简洁标题
         echo -e "${BLUE}DDNS 凭据管理 🔐${NC}"
         echo -e "  [1] 设置/修改 Cloudflare API Token"
         echo -e "  [2] 设置/删除 Aliyun 凭据"
@@ -494,7 +453,7 @@ credentials_menu() {
                 read -rp "请输入 Cloudflare API Token（回车取消）: " token
                 if [[ -n "$token" ]]; then
                     save_config_kv "cloudflare_api_token" "$token"
-                    log "[INFO]" "已保存 Cloudflare API Token"
+                    log "[INFO] 已保存 Cloudflare API Token"
                 else
                     echo "已取消或未输入。"
                 fi
@@ -511,14 +470,14 @@ credentials_menu() {
                     if [[ -n "$akid" && -n "$aks" ]]; then
                         save_config_kv "aliyun_access_key_id" "$akid"
                         save_config_kv "aliyun_access_key_secret" "$aks"
-                        log "[INFO]" "已保存 Aliyun 凭据"
+                        log "[INFO] 已保存 Aliyun 凭据"
                     else
                         echo "输入不完整，已取消。"
                     fi
                 elif [[ "$aopt" == "2" ]]; then
                     delete_config_key "aliyun_access_key_id"
                     delete_config_key "aliyun_access_key_secret"
-                    log "[INFO]" "已删除 Aliyun 凭据"
+                    log "[INFO] 已删除 Aliyun 凭据"
                 fi
                 ;;
             3)
@@ -533,14 +492,14 @@ credentials_menu() {
                     if [[ -n "$sid" && -n "$sk" ]]; then
                         save_config_kv "tencent_secret_id" "$sid"
                         save_config_kv "tencent_secret_key" "$sk"
-                        log "[INFO]" "已保存 Tencent 凭据"
+                        log "[INFO] 已保存 Tencent 凭据"
                     else
                         echo "输入不完整，已取消。"
                     fi
                 elif [[ "$topt" == "2" ]]; then
                     delete_config_key "tencent_secret_id"
                     delete_config_key "tencent_secret_key"
-                    log "[INFO]" "已删除 Tencent 凭据"
+                    log "[INFO] 已删除 Tencent 凭据"
                 fi
                 ;;
             4)
@@ -555,14 +514,14 @@ credentials_menu() {
                     if [[ -n "$hid" && -n "$hsk" ]]; then
                         save_config_kv "huawei_access_key_id" "$hid"
                         save_config_kv "huawei_access_key_secret" "$hsk"
-                        log "[INFO]" "已保存 Huawei 凭据"
+                        log "[INFO] 已保存 Huawei 凭据"
                     else
                         echo "输入不完整，已取消。"
                     fi
                 elif [[ "$hopt" == "2" ]]; then
                     delete_config_key "huawei_access_key_id"
                     delete_config_key "huawei_access_key_secret"
-                    log "[INFO]" "已删除 Huawei 凭据"
+                    log "[INFO] 已删除 Huawei 凭据"
                 fi
                 ;;
             5)
@@ -669,7 +628,7 @@ add_domain_interactive() {
     fi
 
     echo "${domain}|${provider}|${dtype}|on|${interval_minutes}" >> "${CONFIG_FILE}"
-    log "[INFO]" "已添加域名：${domain}|${provider}|${dtype}|on|${interval_minutes}"
+    log "[INFO] 已添加域名：${domain}|${provider}|${dtype}|on|${interval_minutes}"
     echo -e "${GREEN}✅ 域名已添加并启用：${domain}${NC}"
 }
 
@@ -707,7 +666,7 @@ domains_menu() {
                 read -rp "输入新的配置（domain|provider|type|on|interval）: " newv
                 if [[ "$newv" =~ ^[^|]+\|[^|]+\|(v4|v6|v4\+v6)\|(on|off)\|[0-9]+$ ]]; then
                     awk -v n="$ln" 'BEGIN{c=0} { if($0 ~ /^[[:space:]]*#/ || $0 ~ /^[[:space:]]*$/){ print $0 } else { c++; if(c==n) print "'"$newv"'" ; else print $0 } }' "${CONFIG_FILE}" > "${CONFIG_FILE}.tmp" && mv "${CONFIG_FILE}.tmp" "${CONFIG_FILE}"
-                    log "[INFO]" "已编辑第 ${ln} 行 -> ${newv}"
+                    log "[INFO] 已编辑第 ${ln} 行 -> ${newv}"
                 else
                     echo -e "${Error}格式不正确，请参考：domain|provider|type|on|interval"
                 fi
@@ -722,14 +681,14 @@ domains_menu() {
                 IFS='|' read -r d p t e iv <<< "$cur"
                 if [[ "${e,,}" == "on" ]]; then new="${d}|${p}|${t}|off|${iv}"; else new="${d}|${p}|${t}|on|${iv}"; fi
                 awk -v n="$ln" 'BEGIN{c=0} { if($0 ~ /^[[:space:]]*#/ || $0 ~ /^[[:space:]]*$/){ print $0 } else { c++; if(c==n) print "'"$new"'" ; else print $0 } }' "${CONFIG_FILE}" > "${CONFIG_FILE}.tmp" && mv "${CONFIG_FILE}.tmp" "${CONFIG_FILE}"
-                log "[INFO]" "已切换第 ${ln} 行状态 -> ${new}"
+                log "[INFO] 已切换第 ${ln} 行状态 -> ${new}"
                 ;;
             5)
                 load_config
                 read -rp "请输入要删除的行号: " ln
                 if ! [[ "$ln" =~ ^[0-9]+$ ]]; then echo -e "${Error}行号无效"; continue; fi
                 awk -v n="$ln" 'BEGIN{c=0} { if($0 ~ /^[[:space:]]*#/ || $0 ~ /^[[:space:]]*$/){ print $0 } else { c++; if(c==n) next; else print $0 } }' "${CONFIG_FILE}" > "${CONFIG_FILE}.tmp" && mv "${CONFIG_FILE}.tmp" "${CONFIG_FILE}"
-                log "[INFO]" "已删除第 ${ln} 行"
+                log "[INFO] 已删除第 ${ln} 行"
                 ;;
             0) break ;;
             *) echo -e "${Error}无效选择" ;;
@@ -760,7 +719,7 @@ set_interval() {
     sed -i "s/^OnUnitActiveSec=.*$/OnUnitActiveSec=${interval}m/" /etc/systemd/system/ddns.timer
     systemctl daemon-reload
     systemctl restart ddns.timer >/dev/null 2>&1 || true
-    log "[INFO]" "已将 systemd timer 设置为每 ${interval} 分钟运行一次（脚本内部仍按每条 interval 决定是否更新） ✅"
+    log "[INFO] 已将 systemd timer 设置为每 ${interval} 分钟运行一次（脚本内部仍按每条 interval 决定是否更新） ✅"
 }
 
 # 服务管理（启用/停用/手动触发/状态）
@@ -777,16 +736,16 @@ service_menu() {
         case "$sopt" in
             1)
                 systemctl enable --now ddns.timer >/dev/null 2>&1 || true
-                log "[INFO]" "已启用 systemd timer"
+                log "[INFO] 已启用 systemd timer"
                 ;;
             2)
                 systemctl stop ddns.timer >/dev/null 2>&1 || true
                 systemctl disable ddns.timer >/dev/null 2>&1 || true
-                log "[INFO]" "已禁用 systemd timer"
+                log "[INFO] 已禁用 systemd timer"
                 ;;
             3)
                 /bin/bash "${DDNS_SCRIPT}" >> "${LOG_FILE}" 2>&1 || true
-                log "[INFO]" "已手动触发 DDNS 执行"
+                log "[INFO] 已手动触发 DDNS 执行"
                 ;;
             4)
                 if systemctl is-enabled --quiet ddns.timer 2>/dev/null; then echo -e "${Info}systemd timer：${GREEN}已启用${NC}"; else echo -e "${Tip}systemd timer：${RED}未启用${NC}"; fi
@@ -845,11 +804,19 @@ main_menu() {
     done
 }
 
-# 将当前脚本复制为主入口（/etc/DDNS/ddns_manager_main.sh），以便 ddns-easy 调用
+# 支持命令行参数 --run-update 用于 systemd 或 wrapper 调用
+if [[ "${1:-}" == "--run-update" ]]; then
+    # 仅执行更新逻辑并退出
+    load_config
+    perform_update
+    exit 0
+fi
+
+# 在首次运行时把脚本复制到 /etc/DDNS/ddns_manager_main.sh 以便 wrapper 调用
 install_self_copy() {
     mkdir -p /etc/DDNS
-    cp "$0" /etc/DDNS/ddns_manager_main.sh
-    chmod +x /etc/DDNS/ddns_manager_main.sh
+    cp "$0" "${LAUNCHER_PATH}"
+    chmod +x "${LAUNCHER_PATH}"
 }
 
 # 启动

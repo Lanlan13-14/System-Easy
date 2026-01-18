@@ -757,6 +757,48 @@ service_menu() {
     done
 }
 
+# 更新脚本
+update_script() {
+    local target="/usr/local/bin/ddns-easy"
+    local backup="${target}.bak"
+    local url="https://raw.githubusercontent.com/Lanlan13-14/System-Easy/refs/heads/main/ddns.sh"
+
+    echo "🔄 正在更新 ddns-easy 脚本..."
+
+    # 确认目标存在
+    if [ ! -f "$target" ]; then
+        echo "⚠️ 未找到 $target，无法更新。"
+        return 1
+    fi
+
+    # 备份旧版本
+    cp "$target" "$backup"
+    echo "📦 已备份旧版本到 $backup"
+
+    # 下载新版本到临时文件
+    tmpfile=$(mktemp)
+    if ! curl -fsSL "$url" -o "$tmpfile"; then
+        echo "❌ 下载新版本失败，回滚旧版本..."
+        mv "$backup" "$target"
+        return 1
+    fi
+
+    # 语法检查
+    if ! bash -n "$tmpfile"; then
+        echo "❌ 新版本语法错误，回滚旧版本..."
+        mv "$backup" "$target"
+        rm -f "$tmpfile"
+        return 1
+    fi
+
+    # 替换旧版本
+    mv "$tmpfile" "$target"
+    chmod +x "$target"
+    rm -f "$backup"
+
+    echo "✅ 更新完成！现在可以运行: ddns-easy"
+}
+
 # 主菜单
 main_menu() {
     while true; do
@@ -769,7 +811,8 @@ main_menu() {
         echo "[6] 服务管理 ⚙️"
         echo "[7] 更改全局运行间隔（分钟） ⏲️"
         echo "[8] 卸载 DDNS（脚本与数据）🗑️"
-        echo "[9] 退出 🚪"
+        echo "[9] 更新脚本 📥"
+        echo "[10] 退出 🚪"
         read -p "请输入您的选择： " main_choice
 
         case $main_choice in
@@ -791,7 +834,8 @@ main_menu() {
                     echo "已取消卸载"
                 fi
                 ;;
-            9)
+            9) update_script ;;
+            10)
                 echo "👋 已退出，⚡ 下次使用直接运行: ddns-easy"
                 exit 0
                 ;;

@@ -18,6 +18,12 @@ bash <(curl -fsSL https://raw.githubusercontent.com/Lanlan13-14/System-Easy/refs
 ```
 bash <(curl -fsSL https://raw.githubusercontent.com/Lanlan13-14/System-Easy/refs/heads/main/remove-bbr-tuning.sh)
 ```
+#### 1.仅DDNS脚本
+```
+curl -fsSL https://raw.githubusercontent.com/Lanlan13-14/System-Easy/refs/heads/main/ddns.sh -o /tmp/ddns-easy && chmod +x /tmp/ddns-easy && sudo mv /tmp/ddns-easy /usr/local/bin/ddns-easy && ddns-easy
+```
+### 3. 卸载
+##### 卸载选项在脚本中已提供
 ### 特别感谢
 [byJoey](https://github.com/byJoey/Actions-bbr-v3)
 >

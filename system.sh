@@ -1150,6 +1150,33 @@ swap_menu() {
         esac
     done
 }
+# 功能：运行 DDNS 管理脚本 🌐（自动拉取 + 安装 + 运行）
+ddns_menu() {
+    echo "正在拉取 DDNS 管理脚本 ⏳..."
+
+    # 下载到临时目录
+    curl -fsSL https://raw.githubusercontent.com/Lanlan13-14/System-Easy/refs/heads/main/ddns.sh -o /tmp/ddns-easy
+
+    if [ $? -ne 0 ]; then
+        echo "❌ 下载失败，请检查网络或脚本URL 😔"
+        return
+    fi
+
+    # 赋予执行权限
+    chmod +x /tmp/ddns-easy
+
+    # 移动到系统路径
+    sudo mv /tmp/ddns-easy /usr/local/bin/ddns-easy
+
+    if [ $? -eq 0 ]; then
+        echo "🎉 DDNS 管理脚本安装完成！"
+        echo "⚡ 正在启动 DDNS 管理菜单..."
+        sleep 1
+        ddns-easy   # ⭐ 自动跳转执行 DDNS 菜单
+    else
+        echo "❌ 安装失败，请检查权限或系统状态 😔"
+    fi
+}
 # 新增功能18：TCP Fast Open (TFO) 管理子菜单 🚀
 tfo_menu() {
     while true; do

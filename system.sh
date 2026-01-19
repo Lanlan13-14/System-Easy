@@ -1221,26 +1221,28 @@ tfo_menu() {
 # 主菜单 📋
 while true; do
     echo "系统维护脚本菜单 📋："
-    echo "1. 安装常用工具和依赖 🛠️"
-    echo "2. 日志清理管理 🗑️"
-    echo "3. BBR管理 ⚡"
-    echo "4. DNS管理 🌐"
-    echo "5. 修改主机名 🖥️"
-    echo "6. SSH端口管理 🔒"
-    echo "7. 修改SSH密码 🔑"
-    echo "8. SSH密钥登录管理 🔑"
-    echo "9. 卸载脚本 🗑️"
-    echo "10. 设置系统时区与时间同步 ⏰"
-    echo "11. 更新脚本 📥"
-    echo "12. 查看端口占用 🔍"
-    echo "13. 查看内存占用最大程序 💾"
-    echo "14. 查看CPU占用最大程序 🖥️"
-    echo "15. 设置系统定时重启 🔄"
-    echo "16. Cron任务管理 ⏰"
-    echo "17. SWAP管理 💾"
-    echo "18. TCP Fast Open (TFO) 管理 🚀"
-    echo "19. 退出 🚪"
+    echo "[1] 安装常用工具和依赖 🛠️"
+    echo "[2] 日志清理管理 🗑️"
+    echo "[3] BBR管理 ⚡"
+    echo "[4] DNS管理 🌐"
+    echo "[5] 修改主机名 🖥️"
+    echo "[6] SSH端口管理 🔒"
+    echo "[7] 修改SSH密码 🔑"
+    echo "[8] SSH密钥登录管理 🔑"
+    echo "[9] 卸载脚本 🗑️"
+    echo "[10] 设置系统时区与时间同步 ⏰"
+    echo "[11] DDNS 管理 🌐"
+    echo "[12] 更新脚本 📥"
+    echo "[13] 查看端口占用 🔍"
+    echo "[14] 查看内存占用最大程序 💾"
+    echo "[15] 查看CPU占用最大程序 🖥️"
+    echo "[16] 设置系统定时重启 🔄"
+    echo "[17] Cron任务管理 ⏰"
+    echo "[18] SWAP管理 💾"
+    echo "[19] TCP Fast Open (TFO) 管理 🚀"
+    echo "[20] 退出 🚪"
     read -p "请输入您的选择： " main_choice
+
     case $main_choice in
         1) install_tools ;;
         2) log_cleanup_menu ;;
@@ -1252,18 +1254,21 @@ while true; do
         8) ssh_key_management ;;
         9) uninstall_script ;;
         10) set_timezone ;;
-        11) update_script ;;
-        12) check_port_usage ;;
-        13) check_memory_usage ;;
-        14) check_cpu_usage ;;
-        15) set_system_reboot ;;
-        16) cron_task_menu ;;
-        17) swap_menu ;;
-        18) tfo_menu ;;
-        19)
+        11) ddns_menu ;;
+        12) update_script ;;
+        13) check_port_usage ;;
+        14) check_memory_usage ;;
+        15) check_cpu_usage ;;
+        16) set_system_reboot ;;
+        17) cron_task_menu ;;
+        18) swap_menu ;;
+        19) tfo_menu ;;
+        20)
             echo "👋 已退出，⚡ 下次使用直接运行: sudo system-easy"
             exit 0
             ;;
-        *) echo "无效选择，请重试 😕" ;;
+        *)
+            echo "无效选择，请重试 😕"
+            ;;
     esac
 done

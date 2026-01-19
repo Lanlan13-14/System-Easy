@@ -836,14 +836,12 @@ main_menu() {
                 ;;
             9) update_script ;;
             10)
-                echo "👋 已退出 DDNS 管理"
-
                 # 判断是否为“直接运行脚本”
                 if [[ "$0" == "$BASH_SOURCE" ]]; then
-                    echo "⚡ 下次使用直接运行: ddns-easy"
+                    echo "👋 已退出，⚡ 下次使用直接运行: ddns-easy"
                     exit 0
                 else
-                    echo "🔙 正在返回 system-easy 主菜单..."
+                    echo "🔙 已退出 DDNS 管理，正在返回 system-easy 主菜单..."
                     return 0
                 fi
                 ;;

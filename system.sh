@@ -73,7 +73,7 @@ bbr_menu() {
         apply_sysctl
     }
 
-    # 🔥 优化后的清理函数
+    # 🔥 优化后的清理函数（保留但不用于卸载流程）
     reset_sysctl_d_defaults() {
         echo "🔄 正在彻底清理 sysctl 配置..."
 
@@ -102,7 +102,7 @@ bbr_menu() {
         echo "================ BBR管理菜单 ⚡ ================"
         echo "1. 安装BBR v3 🚀"
         echo "2. 应用BBR优化 ⚙️"
-        echo "3. 卸载BBR 🗑️"
+        echo "3. 卸载BBR（按你要求的清理流程）🗑️"
         echo "4. 恢复备份 🔄"
         echo "5. 重置BBR配置 🔄"
         echo "6. 备份管理 🗂️"
@@ -138,13 +138,55 @@ bbr_menu() {
                 read -p "按回车返回菜单 🔙"
                 ;;
             3)
-                echo "卸载BBR 🗑️..."
-                if check_bbr_loaded; then
-                    rmmod tcp_bbr 2>/dev/null && echo "✅ BBR模块已移除" || echo "⚠️ 无法移除BBR模块"
-                else
-                    echo "BBR模块未加载，无需卸载 ✅"
+                echo "卸载BBR（将按指定流程删除/清空配置）🗑️"
+                echo "将执行以下操作："
+                echo "  rm -f /etc/sysctl.d/network-tuning.conf"
+                echo "  rm -f /etc/security/limits.d/99-custom-limits.conf"
+                echo "  rm -rf /etc/sysctl.d"
+                echo "  echo \"\" > /etc/sysctl.conf"
+                echo "  sysctl -p"
+                echo "  sysctl --system"
+                echo "并会尝试卸载 tcp_bbr 模块（如已加载）。"
+                read -p "确认执行上述卸载与清理操作？输入 'yes' 以继续: " confirm_uninstall
+                if [[ "$confirm_uninstall" != "yes" ]]; then
+                    echo "已取消卸载操作。"
+                    read -p "按回车返回菜单 🔙"
+                    continue
                 fi
+
+                # 1) 卸载 BBR 模块（如已加载）
+                if check_bbr_loaded; then
+                    if rmmod tcp_bbr 2>/dev/null; then
+                        echo "✅ BBR 模块已移除"
+                    else
+                        echo "⚠️ 无法移除 BBR 模块（可能正在使用或内核不允许），继续执行清理"
+                    fi
+                else
+                    echo "BBR 模块未加载，无需卸载 ✅"
+                fi
+
+                # 2) 删除指定文件（按你的要求）
+                rm -f /etc/sysctl.d/network-tuning.conf 2>/dev/null || true
+                rm -f /etc/security/limits.d/99-custom-limits.conf 2>/dev/null || true
+
+                # 3) 删除整个 /etc/sysctl.d 目录（危险操作，按你的要求执行）
+                if [ -d /etc/sysctl.d ]; then
+                    rm -rf /etc/sysctl.d
+                    # 重新创建空目录以避免后续工具报错
+                    mkdir -p /etc/sysctl.d
+                fi
+
+                # 4) 清空 /etc/sysctl.conf
+                : > /etc/sysctl.conf
+
+                # 5) 立即应用 sysctl 配置
+                sysctl -p 2>/dev/null || true
+                sysctl --system 2>/dev/null || true
+
+                # 6) 恢复默认拥塞控制为 cubic（确保系统有合理默认）
                 restore_default_tcp
+
+                echo "✅ 卸载与清理完成，请检查系统并重启以确保所有更改生效。"
                 read -p "按回车返回菜单 🔙"
                 ;;
             4)

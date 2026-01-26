@@ -102,7 +102,7 @@ bbr_menu() {
         echo "================ BBR管理菜单 ⚡ ================"
         echo "1. 安装BBR v3 🚀"
         echo "2. 应用BBR优化 ⚙️"
-        echo "3. 卸载BBR（按你要求的清理流程）🗑️"
+        echo "3. 卸载BBR 🗑️"
         echo "4. 恢复备份 🔄"
         echo "5. 重置BBR配置 🔄"
         echo "6. 备份管理 🗂️"

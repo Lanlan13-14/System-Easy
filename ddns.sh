@@ -2,7 +2,7 @@
 #
 # ddns_manager.sh - 交互式 DDNS 管理（Debian/Ubuntu 专用）
 # 特性：
-# - Cloudflare / Aliyun / Tencent / Huawei 凭据交互式输入与管理
+# - Cloudflare / Aliyun / Tencent / Huawei / Dynv6 凭据交互式输入与管理
 # - 域名交互式添加（provider/type/interval）
 # - 每条域名支持独立 interval（分钟）
 # - 左对齐美化标题与菜单，带 emoji
@@ -50,7 +50,7 @@ if [ ! -f "${CONFIG_FILE}" ]; then
     cat > "${CONFIG_FILE}" <<'EOF'
 # DDNS 配置文件（由脚本管理，请勿手动修改）
 # Cloudflare token 存放：cloudflare_api_token="..."
-# Aliyun/Tencent/Huawei 凭据由脚本交互式写入
+# Aliyun/Tencent/Huawei/Dynv6 凭据由脚本交互式写入
 # 域名行格式：domain|provider|type|on|interval
 EOF
     chmod 600 "${CONFIG_FILE}"
@@ -151,8 +151,8 @@ provider_install() {
             if command -v pip3 >/dev/null 2>&1; then pip3 install --upgrade huaweicloud-cli huaweicloudsdkcore >/dev/null 2>&1 || true; fi
             if command -v huaweicloud >/dev/null 2>&1 || command -v hwcloud >/dev/null 2>&1; then log "[INFO] Huawei CLI 安装成功 ✅"; else log "[WARN] Huawei CLI 未检测到"; fi
             ;;
-        cloudflare)
-            log "[INFO] Cloudflare 使用 API Token，无需强制安装 CLI。"
+        cloudflare|dynv6)
+            log "[INFO] ${provider} 使用 API Token，无需强制安装 CLI。"
             ;;
         *)
             log "[ERROR] 未知 provider: ${provider}"
@@ -167,7 +167,7 @@ provider_uninstall() {
         aliyun) if command -v pip3 >/dev/null 2>&1; then pip3 uninstall -y aliyun-cli >/dev/null 2>&1 || true; fi ;;
         tencent) if command -v pip3 >/dev/null 2>&1; then pip3 uninstall -y tccli tencentcloud-sdk-python >/dev/null 2>&1 || true; fi ;;
         huawei) if command -v pip3 >/dev/null 2>&1; then pip3 uninstall -y huaweicloud-cli huaweicloudsdkcore >/dev/null 2>&1 || true; fi ;;
-        cloudflare) log "[INFO] Cloudflare CLI 非必需，若安装请手动卸载。" ;;
+        cloudflare|dynv6) log "[INFO] ${provider} CLI 非必需，若安装请手动卸载。" ;;
         *) log "[ERROR] 未知 provider: ${provider}" ;;
     esac
     log "[INFO] 卸载尝试完成，请检查是否仍存在对应命令。"
@@ -240,6 +240,35 @@ update_record() {
                 return 0
             else
                 log "[WARN] Huawei CLI 未安装，跳过 ${domain}"
+                return 1
+            fi
+            ;;
+        dynv6)
+            if [ -z "${dynv6_token:-}" ]; then
+                log "[WARN] Dynv6 token 未配置，跳过 ${domain}"
+                return 1
+            fi
+            
+            local url response
+            # Dynv6 API 文档: https://dynv6.com/docs/apis
+            if [ "$rec_type" = "A" ]; then
+                url="https://dynv6.com/api/update?hostname=${domain}&token=${dynv6_token}&ipv4=${ip}"
+            elif [ "$rec_type" = "AAAA" ]; then
+                url="https://dynv6.com/api/update?hostname=${domain}&token=${dynv6_token}&ipv6=${ip}"
+            else
+                log "[ERROR] Dynv6: 不支持的记录类型 ${rec_type}"
+                return 1
+            fi
+            
+            response=$(curl -s --max-time 10 "$url")
+            
+            # Dynv6 成功响应通常包含 "addresses updated" 或 "nochg"
+            if echo "$response" | grep -q -E "addresses updated|nochg"; then
+                log "[INFO] Dynv6: ${domain} ${rec_type} -> ${ip} 成功"
+                return 0
+            else
+                log "[ERROR] Dynv6 更新失败: ${domain} ${rec_type} -> ${ip}"
+                log "[ERROR] Dynv6 响应: ${response}"
                 return 1
             fi
             ;;
@@ -436,7 +465,7 @@ uninstall_ddns_all() {
     log "[INFO] 已卸载 DDNS（脚本与数据已移除）。"
 }
 
-# 交互式凭据管理（Cloudflare / Aliyun / Tencent / Huawei）
+# 交互式凭据管理（Cloudflare / Aliyun / Tencent / Huawei / Dynv6）
 credentials_menu() {
     while true; do
         echo
@@ -445,7 +474,8 @@ credentials_menu() {
         echo -e "  [2] 设置/删除 Aliyun 凭据"
         echo -e "  [3] 设置/删除 Tencent 凭据"
         echo -e "  [4] 设置/删除 Huawei 凭据"
-        echo -e "  [5] 安装/卸载 对应 CLI（Aliyun/Tencent/Huawei）"
+        echo -e "  [5] 设置/删除 Dynv6 Token"
+        echo -e "  [6] 安装/卸载 对应 CLI（Aliyun/Tencent/Huawei）"
         echo -e "  [0] 返回"
         read -rp "选择: " copt
         case "$copt" in
@@ -525,6 +555,26 @@ credentials_menu() {
                 fi
                 ;;
             5)
+                echo "Dynv6 Token 管理："
+                echo "  [1] 设置 Dynv6 Token"
+                echo "  [2] 删除 Dynv6 Token"
+                echo "  [0] 返回"
+                read -rp "选择: " dopt
+                if [[ "$dopt" == "1" ]]; then
+                    read -rp "请输入 Dynv6 API Token（可在 https://dynv6.com/keys 获取）: " dtoken
+                    if [[ -n "$dtoken" ]]; then
+                        save_config_kv "dynv6_token" "$dtoken"
+                        log "[INFO] 已保存 Dynv6 Token"
+                        echo -e "${Tip}注意：Dynv6 域名格式通常是 yourhost.dynv6.net"
+                    else
+                        echo "输入为空，已取消。"
+                    fi
+                elif [[ "$dopt" == "2" ]]; then
+                    delete_config_key "dynv6_token"
+                    log "[INFO] 已删除 Dynv6 Token"
+                fi
+                ;;
+            6)
                 echo "CLI 安装/卸载："
                 echo "  [1] 安装 Aliyun CLI"
                 echo "  [2] 安装 Tencent CLI"
@@ -557,7 +607,7 @@ add_domain_interactive() {
     echo
     echo -e "${Tip}➕ 添加域名（交互式）"
     PS3="请选择服务商（输入数字）: "
-    options=("cloudflare" "aliyun" "tencent" "huawei" "取消")
+    options=("cloudflare" "aliyun" "tencent" "huawei" "dynv6" "取消")
     select prov in "${options[@]}"; do
         if [[ -z "$prov" ]]; then
             echo -e "${Error}无效选择，请重试。"
@@ -572,7 +622,12 @@ add_domain_interactive() {
     done
 
     while true; do
-        read -rp "请输入要添加的域名（例如 myhost.example.com）: " domain_input
+        if [[ "$provider" == "dynv6" ]]; then
+            echo -e "${Tip}Dynv6 域名通常是 yourhost.dynv6.net 格式"
+            read -rp "请输入要添加的域名（例如 myhost.dynv6.net）: " domain_input
+        else
+            read -rp "请输入要添加的域名（例如 myhost.example.com）: " domain_input
+        fi
         domain_input="${domain_input// /}"
         if [[ -z "$domain_input" ]]; then
             echo -e "${Error}域名不能为空，请重新输入。"
@@ -836,7 +891,7 @@ main_menu() {
                 ;;
             9) update_script ;;
             10)
-                # 判断是否为“直接运行脚本”
+                # 判断是否为"直接运行脚本"
                 if [[ "$0" == "$BASH_SOURCE" ]]; then
                     echo "👋 已退出，⚡ 下次使用直接运行: ddns-easy"
                     exit 0

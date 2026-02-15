@@ -1520,6 +1520,7 @@ install_network_tools() {
     echo "按回车键返回菜单 🔙"
     read
 }
+
 # 功能20：查看系统信息（动态刷新） 🔍
 view_system_info() {
     # 保存终端设置
@@ -1527,18 +1528,16 @@ view_system_info() {
     # 设置终端为原始模式，以便读取单个字符
     stty raw -echo
     clear
-    echo -e "${WHITE}系统信息监控模式 (按 q 返回主菜单)${NC}"
+    echo -e "${WHITE}系统信息监控模式 (每10秒刷新，按 q 返回主菜单)${NC}"
     echo ""
     
     while true; do
-        # 移动光标到信息显示起始行（第3行）
-        tput cup 2 0
-        # 显示系统信息（复用show_system_info）
+        # 清屏并显示系统信息
+        clear
         show_system_info
         
         # 显示退出提示
-        tput cup 19 0   # 假设信息占16行，第17行空行，第18行提示
-        echo -e "${YELLOW}按 q 键返回主菜单...${NC}\033[K"
+        echo -e "${YELLOW}按 q 键返回主菜单...${NC}"
         
         # 等待用户输入，超时10秒
         read -t 10 -n 1 key
@@ -1575,8 +1574,8 @@ while true; do
     echo -e "${YELLOW}[7]${NC} 修改SSH密码 🔑       ${YELLOW}[18]${NC} SWAP管理 💾"
     echo -e "${YELLOW}[8]${NC} SSH密钥登录管理 🔑   ${YELLOW}[19]${NC} TFO管理 🚀"
     echo -e "${YELLOW}[9]${NC} 卸载脚本 🗑️          ${YELLOW}[20]${NC} 网络排查工具 🔧"
-    echo -e "${YELLOW}[10]${NC} 时区时间同步 ⏰      ${YELLOW}[21]${NC} 退出 🚪"
-    echo -e "${YELLOW}[11]${NC} DDNS 管理 🌐        ${YELLOW}[22]${NC} 查看系统信息 🔍"
+    echo -e "${YELLOW}[10]${NC} 时区时间同步 ⏰      ${YELLOW}[21]${NC} 查看系统信息 🔍"
+    echo -e "${YELLOW}[11]${NC} DDNS 管理 🌐        ${YELLOW}[22]${NC} 退出 🚪"
     
     echo ""  # 空行
     read -p "请输入您的选择 [1-22]： " main_choice
@@ -1602,11 +1601,11 @@ while true; do
         18) swap_menu ;;
         19) tfo_menu ;;
         20) install_network_tools ;;
-        21)
+        21) view_system_info ;;      # 21 查看系统信息（动态刷新）
+        22)                           # 22 退出
             echo -e "${GREEN}👋 已退出，下次使用直接运行: sudo system-easy${NC}"
             exit 0
             ;;
-        22) view_system_info ;;
         *)
             echo -e "${RED}无效选择，请重试 😕${NC}"
             sleep 1

@@ -19,7 +19,7 @@ fi
 # 脚本URL
 SCRIPT_URL="https://raw.githubusercontent.com/Lanlan13-14/System-Easy/refs/heads/main/system.sh"
 
-# ==================== 系统信息显示函数 ====================
+# 系统信息显示函数 📊（无框无横线版）
 show_system_info() {
     clear
     
@@ -84,9 +84,7 @@ show_system_info() {
         IPV6_DISPLAY="${IPV6_LOCAL:-未分配} (本地)"
     fi
     
-    # --- 打印系统信息（无框，纯颜色标记）---
-    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    
+    # --- 打印系统信息（无横线，纯颜色标记）---
     # 主机和用户
     echo -e "${YELLOW}➤${NC} ${PURPLE}主机${NC} ${WHITE}$HOSTNAME${NC}  ${YELLOW}➤${NC} ${PURPLE}用户${NC} ${WHITE}$USER${NC}"
     
@@ -118,7 +116,10 @@ show_system_info() {
     LOAD_FILL=$((LOAD_1_PERCENT * LOAD_BAR_WIDTH / 100))
     LOAD_EMPTY=$((LOAD_BAR_WIDTH - LOAD_FILL))
     echo -e "${YELLOW}➤${NC} ${PURPLE}负载${NC} ${WHITE}1min: $LOAD_1  5min: $LOAD_5  15min: $LOAD_15${NC}"
-    printf "  [${LOAD_COLOR}%0.s█$(seq 1 $LOAD_FILL)${NC}%0.s░$(seq 1 $LOAD_EMPTY)${NC}] ${LOAD_COLOR}%3d%%${NC}\n" $LOAD_1_PERCENT
+    printf "  ["
+    printf "%0.s█" $(seq 1 $LOAD_FILL)
+    printf "%0.s░" $(seq 1 $LOAD_EMPTY)
+    printf "] ${LOAD_COLOR}%3d%%${NC}\n" $LOAD_1_PERCENT
     
     # 内存（带进度条）
     if [ $MEM_PERCENT -gt 80 ]; then
@@ -132,7 +133,10 @@ show_system_info() {
     MEM_FILL=$((MEM_PERCENT * MEM_BAR_WIDTH / 100))
     MEM_EMPTY=$((MEM_BAR_WIDTH - MEM_FILL))
     echo -e "${YELLOW}➤${NC} ${PURPLE}内存${NC} ${WHITE}${MEM_USED}MB / ${MEM_TOTAL}MB${NC}"
-    printf "  [${MEM_COLOR}%0.s█$(seq 1 $MEM_FILL)${NC}%0.s░$(seq 1 $MEM_EMPTY)${NC}] ${MEM_COLOR}%3d%%${NC}\n" $MEM_PERCENT
+    printf "  ["
+    printf "%0.s█" $(seq 1 $MEM_FILL)
+    printf "%0.s░" $(seq 1 $MEM_EMPTY)
+    printf "] ${MEM_COLOR}%3d%%${NC}\n" $MEM_PERCENT
     
     # 硬盘（带进度条）
     if [ $DISK_PERCENT -gt 80 ]; then
@@ -146,7 +150,10 @@ show_system_info() {
     DISK_FILL=$((DISK_PERCENT * DISK_BAR_WIDTH / 100))
     DISK_EMPTY=$((DISK_BAR_WIDTH - DISK_FILL))
     echo -e "${YELLOW}➤${NC} ${PURPLE}硬盘${NC} ${WHITE}${DISK_USED}GB / ${DISK_TOTAL}GB${NC}"
-    printf "  [${DISK_COLOR}%0.s█$(seq 1 $DISK_FILL)${NC}%0.s░$(seq 1 $DISK_EMPTY)${NC}] ${DISK_COLOR}%3d%%${NC}\n" $DISK_PERCENT
+    printf "  ["
+    printf "%0.s█" $(seq 1 $DISK_FILL)
+    printf "%0.s░" $(seq 1 $DISK_EMPTY)
+    printf "] ${DISK_COLOR}%3d%%${NC}\n" $DISK_PERCENT
     
     # 网络流量
     echo -e "${YELLOW}➤${NC} ${PURPLE}网卡${NC} ${WHITE}$MAIN_IF${NC}  ${CYAN}接收${NC} ${WHITE}$RX_READABLE${NC}  ${CYAN}发送${NC} ${WHITE}$TX_READABLE${NC}"
@@ -154,8 +161,7 @@ show_system_info() {
     # 运行时间和进程
     echo -e "${YELLOW}➤${NC} ${PURPLE}运行${NC} ${WHITE}$UPTIME${NC}  ${YELLOW}➤${NC} ${PURPLE}进程${NC} ${WHITE}$PROCESSES${NC}"
     
-    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo ""
+    echo ""  # 空行分隔
 }
 
 # 功能1：安装常用工具和依赖 🛠️
@@ -1440,15 +1446,13 @@ tfo_menu() {
     done
 }
 
-# ==================== 主菜单 ====================
+# 主菜单（无框无横线版）
 while true; do
     # 每次显示菜单前先显示系统信息
     show_system_info
     
-    # 菜单标题
-    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${WHITE}                        功能菜单                              ${NC}"
-    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    # 菜单标题（仅文字）
+    echo -e "${WHITE}功能菜单${NC}"
     
     # 两列菜单（无框，只有颜色标记）
     echo -e "${YELLOW}[1]${NC} 安装常用工具 🛠️       ${YELLOW}[11]${NC} DDNS 管理 🌐"
@@ -1462,7 +1466,7 @@ while true; do
     echo -e "${YELLOW}[9]${NC} 卸载脚本 🗑️          ${YELLOW}[19]${NC} TFO管理 🚀"
     echo -e "${YELLOW}[10]${NC} 时区时间同步 ⏰      ${YELLOW}[20]${NC} 退出 🚪"
     
-    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo ""  # 空行
     read -p "请输入您的选择 [1-20]： " main_choice
 
     case $main_choice in

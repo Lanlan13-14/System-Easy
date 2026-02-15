@@ -1560,7 +1560,7 @@ while true; do
     echo -e "\033[17;1H"
     
     # 使用read -t 10等待用户输入，超时后只刷新系统信息
-    read -t 10 -p "请输入您的选择 [1-21]（系统信息每10秒自动刷新）： " main_choice
+    read -t 10 -p "请输入您的选择 [1-21]： " main_choice
     
     # 检查是否超时（用户没有输入）
     if [ $? -gt 128 ]; then

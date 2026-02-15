@@ -19,7 +19,7 @@ fi
 # 脚本URL
 SCRIPT_URL="https://raw.githubusercontent.com/Lanlan13-14/System-Easy/refs/heads/main/system.sh"
 
-# 系统信息显示函数 📊（无框无横线版）- 保持原样，只获取数据
+# 系统信息显示函数 📊
 show_system_info() {
     clear
 

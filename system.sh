@@ -19,9 +19,9 @@ fi
 # 脚本URL
 SCRIPT_URL="https://raw.githubusercontent.com/Lanlan13-14/System-Easy/refs/heads/main/system.sh"
 
-# 系统信息显示函数 📊（无框无横线版）- 每10秒动态刷新
+# 系统信息显示函数 📊（无框无横线版）- 只输出信息，不包含clear
 show_system_info() {
-    clear
+    # 不再使用clear，因为要局部刷新
 
     # --- 静态信息（只在脚本启动时获取）---
     if [ -z "$STATIC_INFO_LOADED" ]; then
@@ -111,79 +111,70 @@ show_system_info() {
         IPV6_DISPLAY="未分配 (本地)"
     fi
 
-    # --- 输出 ---
-    echo -e "${YELLOW}➤${NC} ${PURPLE}主机${NC} ${WHITE}$HOSTNAME${NC}  ${YELLOW}➤${NC} ${PURPLE}用户${NC} ${WHITE}$USER${NC}"
-    echo -e "${YELLOW}➤${NC} ${PURPLE}系统${NC} ${WHITE}${OS_INFO:0:60}${NC}"
-    echo -e "${YELLOW}➤${NC} ${PURPLE}内核${NC} ${WHITE}$KERNEL${NC}  ${YELLOW}➤${NC} ${PURPLE}架构${NC} ${WHITE}$ARCH${NC}"
-    echo -e "${YELLOW}➤${NC} ${PURPLE}IPv4${NC} ${WHITE}$IPV4_DISPLAY${NC}"
-    echo -e "${YELLOW}➤${NC} ${PURPLE}IPv6${NC} ${WHITE}$IPV6_DISPLAY${NC}"
-    echo -e "${YELLOW}➤${NC} ${PURPLE}CPU${NC} ${WHITE}${CPU_MODEL:0:50}${NC}"
-    echo -e "  ${CYAN}核心${NC} ${WHITE}$CPU_CORES${NC}  ${CYAN}频率${NC} ${WHITE}$CPU_FREQ MHz${NC}"
+    # --- 输出动态信息（使用固定的行号位置）---
+    # 第1行：主机和用户
+    echo -e "\033[1;1H${YELLOW}➤${NC} ${PURPLE}主机${NC} ${WHITE}$HOSTNAME${NC}  ${YELLOW}➤${NC} ${PURPLE}用户${NC} ${WHITE}$USER${NC}                                                                        "
+    # 第2行：系统
+    echo -e "\033[2;1H${YELLOW}➤${NC} ${PURPLE}系统${NC} ${WHITE}${OS_INFO:0:60}${NC}                                                                        "
+    # 第3行：内核和架构
+    echo -e "\033[3;1H${YELLOW}➤${NC} ${PURPLE}内核${NC} ${WHITE}$KERNEL${NC}  ${YELLOW}➤${NC} ${PURPLE}架构${NC} ${WHITE}$ARCH${NC}                                                                        "
+    # 第4行：IPv4
+    echo -e "\033[4;1H${YELLOW}➤${NC} ${PURPLE}IPv4${NC} ${WHITE}$IPV4_DISPLAY${NC}                                                                        "
+    # 第5行：IPv6
+    echo -e "\033[5;1H${YELLOW}➤${NC} ${PURPLE}IPv6${NC} ${WHITE}$IPV6_DISPLAY${NC}                                                                        "
+    # 第6行：CPU型号
+    echo -e "\033[6;1H${YELLOW}➤${NC} ${PURPLE}CPU${NC} ${WHITE}${CPU_MODEL:0:50}${NC}                                                                        "
+    # 第7行：核心和频率
+    echo -e "\033[7;1H  ${CYAN}核心${NC} ${WHITE}$CPU_CORES${NC}  ${CYAN}频率${NC} ${WHITE}$CPU_FREQ MHz${NC}                                                                        "
 
-    # 负载条
+    # 第8行：负载文字
+    echo -e "\033[8;1H${YELLOW}➤${NC} ${PURPLE}负载${NC} ${WHITE}1min: $LOAD_1  5min: $LOAD_5  15min: $LOAD_15${NC}                                                                        "
+    # 第9行：负载条
     if [ "$LOAD_1_PERCENT" -gt 80 ]; then LOAD_COLOR=$RED
     elif [ "$LOAD_1_PERCENT" -gt 50 ]; then LOAD_COLOR=$YELLOW
     else LOAD_COLOR=$GREEN; fi
     LOAD_BAR_WIDTH=30
     LOAD_FILL=$((LOAD_1_PERCENT * LOAD_BAR_WIDTH / 100))
     LOAD_EMPTY=$((LOAD_BAR_WIDTH - LOAD_FILL))
-    echo -e "${YELLOW}➤${NC} ${PURPLE}负载${NC} ${WHITE}1min: $LOAD_1  5min: $LOAD_5  15min: $LOAD_15${NC}"
-    printf "  ["
+    printf "\033[9;1H  ["
     printf "%0.s█" $(seq 1 $LOAD_FILL)
     printf "%0.s░" $(seq 1 $LOAD_EMPTY)
-    printf "] ${LOAD_COLOR}%3d%%${NC}\n" $LOAD_1_PERCENT
+    printf "] ${LOAD_COLOR}%3d%%${NC}                                                                        \n" $LOAD_1_PERCENT
 
-    # 内存条
+    # 第10行：内存文字
+    echo -e "\033[10;1H${YELLOW}➤${NC} ${PURPLE}内存${NC} ${WHITE}${MEM_USED}MB / ${MEM_TOTAL}MB${NC}                                                                        "
+    # 第11行：内存条
     if [ "$MEM_PERCENT" -gt 80 ]; then MEM_COLOR=$RED
     elif [ "$MEM_PERCENT" -gt 50 ]; then MEM_COLOR=$YELLOW
     else MEM_COLOR=$GREEN; fi
     MEM_BAR_WIDTH=30
     MEM_FILL=$((MEM_PERCENT * MEM_BAR_WIDTH / 100))
     MEM_EMPTY=$((MEM_BAR_WIDTH - MEM_FILL))
-    echo -e "${YELLOW}➤${NC} ${PURPLE}内存${NC} ${WHITE}${MEM_USED}MB / ${MEM_TOTAL}MB${NC}"
-    printf "  ["
+    printf "\033[11;1H  ["
     printf "%0.s█" $(seq 1 $MEM_FILL)
     printf "%0.s░" $(seq 1 $MEM_EMPTY)
-    printf "] ${MEM_COLOR}%3d%%${NC}\n" $MEM_PERCENT
+    printf "] ${MEM_COLOR}%3d%%${NC}                                                                        \n" $MEM_PERCENT
 
-    # 硬盘条
+    # 第12行：硬盘文字
+    echo -e "\033[12;1H${YELLOW}➤${NC} ${PURPLE}硬盘${NC} ${WHITE}${DISK_USED}GB / ${DISK_TOTAL}GB${NC}                                                                        "
+    # 第13行：硬盘条
     if [ "$DISK_PERCENT" -gt 80 ]; then DISK_COLOR=$RED
     elif [ "$DISK_PERCENT" -gt 50 ]; then DISK_COLOR=$YELLOW
     else DISK_COLOR=$GREEN; fi
     DISK_BAR_WIDTH=30
     DISK_FILL=$((DISK_PERCENT * DISK_BAR_WIDTH / 100))
     DISK_EMPTY=$((DISK_BAR_WIDTH - DISK_FILL))
-    echo -e "${YELLOW}➤${NC} ${PURPLE}硬盘${NC} ${WHITE}${DISK_USED}GB / ${DISK_TOTAL}GB${NC}"
-    printf "  ["
+    printf "\033[13;1H  ["
     printf "%0.s█" $(seq 1 $DISK_FILL)
     printf "%0.s░" $(seq 1 $DISK_EMPTY)
-    printf "] ${DISK_COLOR}%3d%%${NC}\n" $DISK_PERCENT
+    printf "] ${DISK_COLOR}%3d%%${NC}                                                                        \n" $DISK_PERCENT
 
-    echo -e "${YELLOW}➤${NC} ${PURPLE}网卡${NC} ${WHITE}$MAIN_IF${NC}  ${CYAN}接收${NC} ${WHITE}$RX_READABLE${NC}  ${CYAN}发送${NC} ${WHITE}$TX_READABLE${NC}"
-    echo -e "${YELLOW}➤${NC} ${PURPLE}运行${NC} ${WHITE}$UPTIME${NC}  ${YELLOW}➤${NC} ${PURPLE}进程${NC} ${WHITE}$PROCESSES${NC}"
-    echo ""
-}
-
-# 公网IP获取函数（移出show_system_info，避免重复定义）
-is_private_ip() {
-    [[ $1 =~ ^10\. ]] || \
-    [[ $1 =~ ^192\.168\. ]] || \
-    [[ $1 =~ ^172\.(1[6-9]|2[0-9]|3[0-1])\. ]]
-}
-
-get_public_ipv4() {
-    for api in \
-        "https://api.ipify.org" \
-        "https://ipv4.icanhazip.com" \
-        "https://ipinfo.io/ip" \
-        "https://ip.sb"
-    do
-        ip=$(curl -s --connect-timeout 2 "$api" | tr -d '\n')
-        if [[ $ip =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] && ! is_private_ip "$ip"; then
-            echo "$ip"
-            return
-        fi
-    done
+    # 第14行：网卡
+    echo -e "\033[14;1H${YELLOW}➤${NC} ${PURPLE}网卡${NC} ${WHITE}$MAIN_IF${NC}  ${CYAN}接收${NC} ${WHITE}$RX_READABLE${NC}  ${CYAN}发送${NC} ${WHITE}$TX_READABLE${NC}                                                                        "
+    # 第15行：运行和进程
+    echo -e "\033[15;1H${YELLOW}➤${NC} ${PURPLE}运行${NC} ${WHITE}$UPTIME${NC}  ${YELLOW}➤${NC} ${PURPLE}进程${NC} ${WHITE}$PROCESSES${NC}                                                                        "
+    # 第16行：空行
+    echo -e "\033[16;1H                                                                        "
 }
 
 # 功能1：安装常用工具和依赖 🛠️
@@ -1537,39 +1528,43 @@ install_network_tools() {
 
 # 主菜单（无框无横线版）- 系统信息每10秒自动刷新
 while true; do
-    # 显示系统信息（第一次）
-    show_system_info
+    # 第一次进入时显示完整的系统信息和菜单
+    if [ -z "$MENU_DISPLAYED" ]; then
+        clear
+        show_system_info
+        
+        # 菜单标题（仅文字）
+        echo -e "${WHITE}System-Easy功能菜单${NC}"
+        
+        # 两列菜单（无框，只有颜色标记）
+        echo -e "${YELLOW}[1]${NC} 安装常用工具 🛠️       ${YELLOW}[12]${NC} 更新脚本 📥"
+        echo -e "${YELLOW}[2]${NC} 日志清理管理 🗑️       ${YELLOW}[13]${NC} 查看端口占用 🔍"
+        echo -e "${YELLOW}[3]${NC} BBR管理 ⚡            ${YELLOW}[14]${NC} 内存占用最大 💾"
+        echo -e "${YELLOW}[4]${NC} DNS管理 🌐           ${YELLOW}[15]${NC} CPU占用最大 🖥️"
+        echo -e "${YELLOW}[5]${NC} 修改主机名 🖥️        ${YELLOW}[16]${NC} 系统定时重启 🔄"
+        echo -e "${YELLOW}[6]${NC} SSH端口管理 🔒       ${YELLOW}[17]${NC} Cron任务管理 ⏰"
+        echo -e "${YELLOW}[7]${NC} 修改SSH密码 🔑       ${YELLOW}[18]${NC} SWAP管理 💾"
+        echo -e "${YELLOW}[8]${NC} SSH密钥登录管理 🔑   ${YELLOW}[19]${NC} TFO管理 🚀"
+        echo -e "${YELLOW}[9]${NC} 卸载脚本 🗑️          ${YELLOW}[20]${NC} 网络排查工具 🔧"
+        echo -e "${YELLOW}[10]${NC} 时区时间同步 ⏰      ${YELLOW}[21]${NC} 退出 🚪"
+        echo -e "${YELLOW}[11]${NC} DDNS 管理 🌐"
+        
+        echo ""  # 空行
+        MENU_DISPLAYED=1
+    else
+        # 只刷新系统信息部分（第1-16行）
+        show_system_info
+    fi
     
-    # 菜单标题（仅文字）
-    echo -e "${WHITE}System-Easy功能菜单${NC}"
+    # 将光标移动到菜单下方，避免覆盖菜单
+    echo -e "\033[17;1H"
     
-    # 两列菜单（无框，只有颜色标记）
-    echo -e "${YELLOW}[1]${NC} 安装常用工具 🛠️       ${YELLOW}[12]${NC} 更新脚本 📥"
-    echo -e "${YELLOW}[2]${NC} 日志清理管理 🗑️       ${YELLOW}[13]${NC} 查看端口占用 🔍"
-    echo -e "${YELLOW}[3]${NC} BBR管理 ⚡            ${YELLOW}[14]${NC} 内存占用最大 💾"
-    echo -e "${YELLOW}[4]${NC} DNS管理 🌐           ${YELLOW}[15]${NC} CPU占用最大 🖥️"
-    echo -e "${YELLOW}[5]${NC} 修改主机名 🖥️        ${YELLOW}[16]${NC} 系统定时重启 🔄"
-    echo -e "${YELLOW}[6]${NC} SSH端口管理 🔒       ${YELLOW}[17]${NC} Cron任务管理 ⏰"
-    echo -e "${YELLOW}[7]${NC} 修改SSH密码 🔑       ${YELLOW}[18]${NC} SWAP管理 💾"
-    echo -e "${YELLOW}[8]${NC} SSH密钥登录管理 🔑   ${YELLOW}[19]${NC} TFO管理 🚀"
-    echo -e "${YELLOW}[9]${NC} 卸载脚本 🗑️          ${YELLOW}[20]${NC} 网络排查工具 🔧"
-    echo -e "${YELLOW}[10]${NC} 时区时间同步 ⏰      ${YELLOW}[21]${NC} 退出 🚪"
-    echo -e "${YELLOW}[11]${NC} DDNS 管理 🌐"
-    
-    echo ""  # 空行
-    
-    # 使用read -t 10等待用户输入，超时后刷新系统信息
-    # 将光标移动到菜单上方，但不覆盖菜单
+    # 使用read -t 10等待用户输入，超时后只刷新系统信息
     read -t 10 -p "请输入您的选择 [1-21]（系统信息每10秒自动刷新）： " main_choice
     
     # 检查是否超时（用户没有输入）
     if [ $? -gt 128 ]; then
-        # 超时，只刷新系统信息部分，不清除菜单
-        # 计算系统信息行数（大约23行）
-        for i in {1..23}; do
-            echo -e "\033[1A\033[K"  # 上移一行并清除
-        done
-        continue  # 重新显示系统信息
+        continue  # 超时，只刷新系统信息
     fi
 
     case $main_choice in
@@ -1602,4 +1597,7 @@ while true; do
             sleep 1
             ;;
     esac
+    
+    # 执行完功能后，重新显示完整界面
+    MENU_DISPLAYED=""
 done

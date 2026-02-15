@@ -1521,48 +1521,6 @@ install_network_tools() {
     read
 }
 
-# 20查看系统信息
-view_system_info() {
-    old_settings=$(stty -g)
-    trap 'stty "$old_settings"; tput cnorm; clear; exit' INT TERM
-    stty raw -echo
-    tput civis
-
-    # 限制宽度，和主菜单一致
-    max_width=50
-    max_lines=16
-
-    while true; do
-        tput clear
-        tput cup 0 0
-        echo -e "${WHITE}系统信息监控模式 (按 q 返回主菜单)${NC}\n"
-
-        info_lines=()
-        while IFS= read -r line; do
-            # 截断行，限制宽度
-            info_lines+=("${line:0:max_width}")
-        done < <(show_system_info)
-
-        for ((i=0;i<max_lines;i++)); do
-            if [ $i -lt ${#info_lines[@]} ]; then
-                printf "%s\n" "${info_lines[$i]}"
-            else
-                printf "\n"
-            fi
-        done
-
-        echo -e "${YELLOW}按 q 键返回主菜单...${NC}"
-
-        if read -t 10 -n 1 key; then
-            [[ "$key" =~ [qQ] ]] && break
-        fi
-    done
-
-    stty "$old_settings"
-    tput cnorm
-    clear
-}
-
 # 主菜单（无框无横线版）
 while true; do
     clear  # 每次进入主菜单先清屏
@@ -1581,8 +1539,7 @@ while true; do
     echo -e "${YELLOW}[7]${NC} 修改SSH密码 🔑       ${YELLOW}[18]${NC} SWAP管理 💾"
     echo -e "${YELLOW}[8]${NC} SSH密钥登录管理 🔑   ${YELLOW}[19]${NC} TFO管理 🚀"
     echo -e "${YELLOW}[9]${NC} 卸载脚本 🗑️          ${YELLOW}[20]${NC} 网络排查工具 🔧"
-    echo -e "${YELLOW}[10]${NC} 时区时间同步 ⏰      ${YELLOW}[21]${NC} 查看系统信息 🔍"
-    echo -e "${YELLOW}[11]${NC} DDNS 管理 🌐        ${YELLOW}[22]${NC} 退出 🚪"
+    echo -e "${YELLOW}[11]${NC} DDNS 管理 🌐        ${YELLOW}[21]${NC} 退出 🚪"
     
     echo ""  # 空行
     read -p "请输入您的选择 [1-22]： " main_choice
@@ -1608,8 +1565,7 @@ while true; do
         18) swap_menu ;;
         19) tfo_menu ;;
         20) install_network_tools ;;
-        21) view_system_info ;;      # 21 查看系统信息（动态刷新）
-        22)                           # 22 退出
+        21)                           # 21 退出
             echo -e "${GREEN}👋 已退出，下次使用直接运行: sudo system-easy${NC}"
             exit 0
             ;;

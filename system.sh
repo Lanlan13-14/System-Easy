@@ -1,18 +1,27 @@
 #!/bin/bash
 
-# 系统信息显示函数 📊（无框简洁版）
+# 颜色定义（标准ANSI，白底可见）
+RED='\033[0;31m'          # 红色
+GREEN='\033[0;32m'        # 绿色
+YELLOW='\033[1;33m'       # 亮黄色
+BLUE='\033[0;34m'         # 蓝色
+PURPLE='\033[0;35m'       # 紫色
+CYAN='\033[0;36m'         # 青色
+WHITE='\033[1;37m'        # 亮白色
+NC='\033[0m'              # 重置颜色
+
+# 检查是否以root身份运行 🚨
+if [ "$(id -u)" != "0" ]; then
+   echo "此脚本必须以root身份运行 🚨" 1>&2
+   exit 1
+fi
+
+# 脚本URL
+SCRIPT_URL="https://raw.githubusercontent.com/Lanlan13-14/System-Easy/refs/heads/main/system.sh"
+
+# ==================== 系统信息显示函数 ====================
 show_system_info() {
     clear
-    
-    # 颜色定义（标准ANSI，白底可见）
-    RED='\033[0;31m'          # 红色
-    GREEN='\033[0;32m'        # 绿色
-    YELLOW='\033[1;33m'       # 亮黄色
-    BLUE='\033[0;34m'         # 蓝色
-    PURPLE='\033[0;35m'       # 紫色
-    CYAN='\033[0;36m'         # 青色
-    WHITE='\033[1;37m'        # 亮白色
-    NC='\033[0m'              # 重置颜色
     
     # --- 静态信息（只在脚本启动时获取）---
     if [ -z "$STATIC_INFO_LOADED" ]; then
@@ -148,15 +157,6 @@ show_system_info() {
     echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo ""
 }
-
-# 检查是否以root身份运行 🚨
-if [ "$(id -u)" != "0" ]; then
-   echo "此脚本必须以root身份运行 🚨" 1>&2
-   exit 1
-fi
-
-# 脚本URL
-SCRIPT_URL="https://raw.githubusercontent.com/Lanlan13-14/System-Easy/refs/heads/main/system.sh"
 
 # 功能1：安装常用工具和依赖 🛠️
 install_tools() {
@@ -1440,60 +1440,58 @@ tfo_menu() {
     done
 }
 
-# 主菜单（无框，两列布局）
-main_menu() {
-    while true; do
-        # 每次显示菜单前先显示系统信息
-        show_system_info
-        
-        # 菜单标题（与系统信息风格一致）
-        echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-        echo -e "${WHITE}                        功能菜单                              ${NC}"
-        echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-        
-        # 两列菜单（无框，只有颜色标记）
-        echo -e "${YELLOW}[1]${NC} 安装常用工具 🛠️       ${YELLOW}[11]${NC} DDNS 管理 🌐"
-        echo -e "${YELLOW}[2]${NC} 日志清理管理 🗑️       ${YELLOW}[12]${NC} 更新脚本 📥"
-        echo -e "${YELLOW}[3]${NC} BBR管理 ⚡            ${YELLOW}[13]${NC} 查看端口占用 🔍"
-        echo -e "${YELLOW}[4]${NC} DNS管理 🌐           ${YELLOW}[14]${NC} 内存占用最大 💾"
-        echo -e "${YELLOW}[5]${NC} 修改主机名 🖥️        ${YELLOW}[15]${NC} CPU占用最大 🖥️"
-        echo -e "${YELLOW}[6]${NC} SSH端口管理 🔒       ${YELLOW}[16]${NC} 系统定时重启 🔄"
-        echo -e "${YELLOW}[7]${NC} 修改SSH密码 🔑       ${YELLOW}[17]${NC} Cron任务管理 ⏰"
-        echo -e "${YELLOW}[8]${NC} SSH密钥登录管理 🔑   ${YELLOW}[18]${NC} SWAP管理 💾"
-        echo -e "${YELLOW}[9]${NC} 卸载脚本 🗑️          ${YELLOW}[19]${NC} TFO管理 🚀"
-        echo -e "${YELLOW}[10]${NC} 时区时间同步 ⏰      ${YELLOW}[20]${NC} 退出 🚪"
-        
-        echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-        read -p "请输入您的选择 [1-20]： " main_choice
+# ==================== 主菜单 ====================
+while true; do
+    # 每次显示菜单前先显示系统信息
+    show_system_info
+    
+    # 菜单标题
+    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${WHITE}                        功能菜单                              ${NC}"
+    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    
+    # 两列菜单（无框，只有颜色标记）
+    echo -e "${YELLOW}[1]${NC} 安装常用工具 🛠️       ${YELLOW}[11]${NC} DDNS 管理 🌐"
+    echo -e "${YELLOW}[2]${NC} 日志清理管理 🗑️       ${YELLOW}[12]${NC} 更新脚本 📥"
+    echo -e "${YELLOW}[3]${NC} BBR管理 ⚡            ${YELLOW}[13]${NC} 查看端口占用 🔍"
+    echo -e "${YELLOW}[4]${NC} DNS管理 🌐           ${YELLOW}[14]${NC} 内存占用最大 💾"
+    echo -e "${YELLOW}[5]${NC} 修改主机名 🖥️        ${YELLOW}[15]${NC} CPU占用最大 🖥️"
+    echo -e "${YELLOW}[6]${NC} SSH端口管理 🔒       ${YELLOW}[16]${NC} 系统定时重启 🔄"
+    echo -e "${YELLOW}[7]${NC} 修改SSH密码 🔑       ${YELLOW}[17]${NC} Cron任务管理 ⏰"
+    echo -e "${YELLOW}[8]${NC} SSH密钥登录管理 🔑   ${YELLOW}[18]${NC} SWAP管理 💾"
+    echo -e "${YELLOW}[9]${NC} 卸载脚本 🗑️          ${YELLOW}[19]${NC} TFO管理 🚀"
+    echo -e "${YELLOW}[10]${NC} 时区时间同步 ⏰      ${YELLOW}[20]${NC} 退出 🚪"
+    
+    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    read -p "请输入您的选择 [1-20]： " main_choice
 
-        case $main_choice in
-            1) install_tools ;;
-            2) log_cleanup_menu ;;
-            3) bbr_menu ;;
-            4) dns_menu ;;
-            5) change_hostname ;;
-            6) ssh_port_menu ;;
-            7) change_ssh_password ;;
-            8) ssh_key_management ;;
-            9) uninstall_script ;;
-            10) set_timezone ;;
-            11) ddns_menu ;;
-            12) update_script ;;
-            13) check_port_usage ;;
-            14) check_memory_usage ;;
-            15) check_cpu_usage ;;
-            16) set_system_reboot ;;
-            17) cron_task_menu ;;
-            18) swap_menu ;;
-            19) tfo_menu ;;
-            20)
-                echo -e "${GREEN}👋 已退出，下次使用直接运行: sudo system-easy${NC}"
-                exit 0
-                ;;
-            *)
-                echo -e "${RED}无效选择，请重试 😕${NC}"
-                sleep 1
-                ;;
-        esac
-    done
-}
+    case $main_choice in
+        1) install_tools ;;
+        2) log_cleanup_menu ;;
+        3) bbr_menu ;;
+        4) dns_menu ;;
+        5) change_hostname ;;
+        6) ssh_port_menu ;;
+        7) change_ssh_password ;;
+        8) ssh_key_management ;;
+        9) uninstall_script ;;
+        10) set_timezone ;;
+        11) ddns_menu ;;
+        12) update_script ;;
+        13) check_port_usage ;;
+        14) check_memory_usage ;;
+        15) check_cpu_usage ;;
+        16) set_system_reboot ;;
+        17) cron_task_menu ;;
+        18) swap_menu ;;
+        19) tfo_menu ;;
+        20)
+            echo -e "${GREEN}👋 已退出，下次使用直接运行: sudo system-easy${NC}"
+            exit 0
+            ;;
+        *)
+            echo -e "${RED}无效选择，请重试 😕${NC}"
+            sleep 1
+            ;;
+    esac
+done

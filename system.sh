@@ -1456,6 +1456,73 @@ tfo_menu() {
     done
 }
 
+# 功能19：安装网络排查工具 🔧 (TCPing, MTR, NextTrace, Speedtest)
+install_network_tools() {
+    echo "正在安装网络排查工具套件 🔧..."
+    echo "包含：TCPing、MTR、NextTrace、Speedtest"
+    echo "----------------------------------------"
+    
+    # 1. 安装 TCPing
+    echo "📡 正在安装 TCPing..."
+    if wget -q --show-progress http://www.vdberg.org/~richard/tcpping -O /usr/bin/tcping; then
+        chmod +x /usr/bin/tcping
+        echo "   ✅ TCPing 安装成功"
+        echo "   使用方法：tcping <目标IP> <目标端口>"
+    else
+        echo "   ❌ TCPing 安装失败，请检查网络连接"
+    fi
+    echo ""
+    
+    # 2. 安装 MTR (通过apt)
+    echo "🖧 正在安装 MTR (通过apt)..."
+    if apt update -y && apt install -y mtr-tiny; then
+        echo "   ✅ MTR 安装成功"
+        echo "   使用方法：mtr <目标IP或域名>"
+    else
+        echo "   ❌ MTR 安装失败，请检查网络连接或软件源"
+    fi
+    echo ""
+    
+    # 3. 安装 NextTrace
+    echo "📍 正在安装 NextTrace..."
+    if curl -sL nxtrace.org/nt | bash; then
+        echo "   ✅ NextTrace 安装成功"
+        echo "   使用方法：nexttrace <目标IP或域名>"
+    else
+        echo "   ❌ NextTrace 安装失败，请检查网络连接"
+    fi
+    echo ""
+    
+    # 4. 安装 Speedtest
+    echo "⚡ 正在安装 Speedtest 测速工具..."
+    # 安装curl（如果未安装）
+    if ! command -v curl >/dev/null; then
+        apt install -y curl
+    fi
+    # 添加Speedtest仓库并安装
+    if curl -s https://packagecloud.io/install/repositories/ookla/speedtest-cli/script.deb.sh | sudo bash && \
+       apt install -y speedtest; then
+        echo "   ✅ Speedtest 安装成功"
+        echo "   使用方法：speedtest"
+    else
+        echo "   ❌ Speedtest 安装失败，请检查网络连接"
+    fi
+    echo ""
+    
+    echo "========================================"
+    echo "🎉 网络排查工具套件安装完成！"
+    echo ""
+    echo "📌 工具汇总："
+    echo "   • TCPing  : tcping <IP> <端口>"
+    echo "   • MTR     : mtr <目标>"
+    echo "   • NextTrace: nexttrace <目标>"
+    echo "   • Speedtest: speedtest"
+    echo ""
+    
+    echo "按回车键返回菜单 🔙"
+    read
+}
+
 # 主菜单（无框无横线版）
 while true; do
     # 每次显示菜单前先显示系统信息
@@ -1465,19 +1532,20 @@ while true; do
     echo -e "${WHITE}System-Easy功能菜单${NC}"
     
     # 两列菜单（无框，只有颜色标记）
-    echo -e "${YELLOW}[1]${NC} 安装常用工具 🛠️       ${YELLOW}[11]${NC} DDNS 管理 🌐"
-    echo -e "${YELLOW}[2]${NC} 日志清理管理 🗑️       ${YELLOW}[12]${NC} 更新脚本 📥"
-    echo -e "${YELLOW}[3]${NC} BBR管理 ⚡            ${YELLOW}[13]${NC} 查看端口占用 🔍"
-    echo -e "${YELLOW}[4]${NC} DNS管理 🌐           ${YELLOW}[14]${NC} 内存占用最大 💾"
-    echo -e "${YELLOW}[5]${NC} 修改主机名 🖥️        ${YELLOW}[15]${NC} CPU占用最大 🖥️"
-    echo -e "${YELLOW}[6]${NC} SSH端口管理 🔒       ${YELLOW}[16]${NC} 系统定时重启 🔄"
-    echo -e "${YELLOW}[7]${NC} 修改SSH密码 🔑       ${YELLOW}[17]${NC} Cron任务管理 ⏰"
-    echo -e "${YELLOW}[8]${NC} SSH密钥登录管理 🔑   ${YELLOW}[18]${NC} SWAP管理 💾"
-    echo -e "${YELLOW}[9]${NC} 卸载脚本 🗑️          ${YELLOW}[19]${NC} TFO管理 🚀"
-    echo -e "${YELLOW}[10]${NC} 时区时间同步 ⏰      ${YELLOW}[20]${NC} 退出 🚪"
+    echo -e "${YELLOW}[1]${NC} 安装常用工具 🛠️       ${YELLOW}[12]${NC} 更新脚本 📥"
+    echo -e "${YELLOW}[2]${NC} 日志清理管理 🗑️       ${YELLOW}[13]${NC} 查看端口占用 🔍"
+    echo -e "${YELLOW}[3]${NC} BBR管理 ⚡            ${YELLOW}[14]${NC} 内存占用最大 💾"
+    echo -e "${YELLOW}[4]${NC} DNS管理 🌐           ${YELLOW}[15]${NC} CPU占用最大 🖥️"
+    echo -e "${YELLOW}[5]${NC} 修改主机名 🖥️        ${YELLOW}[16]${NC} 系统定时重启 🔄"
+    echo -e "${YELLOW}[6]${NC} SSH端口管理 🔒       ${YELLOW}[17]${NC} Cron任务管理 ⏰"
+    echo -e "${YELLOW}[7]${NC} 修改SSH密码 🔑       ${YELLOW}[18]${NC} SWAP管理 💾"
+    echo -e "${YELLOW}[8]${NC} SSH密钥登录管理 🔑   ${YELLOW}[19]${NC} TFO管理 🚀"
+    echo -e "${YELLOW}[9]${NC} 卸载脚本 🗑️          ${YELLOW}[20]${NC} 网络排查工具 🔧"
+    echo -e "${YELLOW}[10]${NC} 时区时间同步 ⏰      ${YELLOW}[21]${NC} 退出 🚪"
+    echo -e "${YELLOW}[11]${NC} DDNS 管理 🌐"
     
     echo ""  # 空行
-    read -p "请输入您的选择 [1-20]： " main_choice
+    read -p "请输入您的选择 [1-21]： " main_choice
 
     case $main_choice in
         1) install_tools ;;
@@ -1499,7 +1567,8 @@ while true; do
         17) cron_task_menu ;;
         18) swap_menu ;;
         19) tfo_menu ;;
-        20)
+        20) install_network_tools ;;
+        21)
             echo -e "${GREEN}👋 已退出，下次使用直接运行: sudo system-easy${NC}"
             exit 0
             ;;

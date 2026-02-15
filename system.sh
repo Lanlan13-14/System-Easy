@@ -19,7 +19,7 @@ fi
 # 脚本URL
 SCRIPT_URL="https://raw.githubusercontent.com/Lanlan13-14/System-Easy/refs/heads/main/system.sh"
 
-# 系统信息显示函数 📊
+# 系统信息显示函数 📊（无框无横线版）- 每10秒动态刷新
 show_system_info() {
     clear
 
@@ -32,9 +32,16 @@ show_system_info() {
         USER=$(whoami)
         CPU_MODEL=$(lscpu | awk -F: '/Model name/ {print $2}' | xargs)
         CPU_CORES=$(nproc)
+        
+        # 公网IP每小时更新一次，避免频繁请求
+        IPV4_PUBLIC=$(get_public_ipv4)
+        IPV6_PUBLIC=$(curl -6 -s --connect-timeout 2 https://api64.ipify.org 2>/dev/null)
+        IP_UPDATE_TIME=$(date +%s)
+        
         STATIC_INFO_LOADED=1
     fi
 
+    # 获取动态数据（每次调用都刷新）
     # --- CPU 频率修复（多重来源）---
     # 1. 实时频率
     CPU_FREQ=$(awk -F: '/cpu MHz/ {print $2; exit}' /proc/cpuinfo | xargs)
@@ -83,29 +90,14 @@ show_system_info() {
     PROCESSES=$(ps aux | wc -l)
     UPTIME=$(uptime -p | sed 's/up //')
 
-    # --- 公网 IP 修复（过滤私网 + 多API）---
-    is_private_ip() {
-        [[ $1 =~ ^10\. ]] || \
-        [[ $1 =~ ^192\.168\. ]] || \
-        [[ $1 =~ ^172\.(1[6-9]|2[0-9]|3[0-1])\. ]]
-    }
+    # --- 公网 IP（每小时更新）---
+    current_time=$(date +%s)
+    if [ $((current_time - IP_UPDATE_TIME)) -gt 3600 ]; then
+        IPV4_PUBLIC=$(get_public_ipv4)
+        IPV6_PUBLIC=$(curl -6 -s --connect-timeout 2 https://api64.ipify.org 2>/dev/null)
+        IP_UPDATE_TIME=$current_time
+    fi
 
-    get_public_ipv4() {
-        for api in \
-            "https://api.ipify.org" \
-            "https://ipv4.icanhazip.com" \
-            "https://ipinfo.io/ip" \
-            "https://ip.sb"
-        do
-            ip=$(curl -s --connect-timeout 2 "$api" | tr -d '\n')
-            if [[ $ip =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] && ! is_private_ip "$ip"; then
-                echo "$ip"
-                return
-            fi
-        done
-    }
-
-    IPV4_PUBLIC=$(get_public_ipv4)
     if [ -n "$IPV4_PUBLIC" ]; then
         IPV4_DISPLAY="$IPV4_PUBLIC"
     else
@@ -113,8 +105,6 @@ show_system_info() {
         IPV4_DISPLAY="${IPV4_LOCAL:-未分配} (本地)"
     fi
 
-    # --- IPv6 ---
-    IPV6_PUBLIC=$(curl -6 -s --connect-timeout 2 https://api64.ipify.org 2>/dev/null)
     if [[ $IPV6_PUBLIC =~ : ]]; then
         IPV6_DISPLAY="$IPV6_PUBLIC"
     else
@@ -172,6 +162,28 @@ show_system_info() {
     echo -e "${YELLOW}➤${NC} ${PURPLE}网卡${NC} ${WHITE}$MAIN_IF${NC}  ${CYAN}接收${NC} ${WHITE}$RX_READABLE${NC}  ${CYAN}发送${NC} ${WHITE}$TX_READABLE${NC}"
     echo -e "${YELLOW}➤${NC} ${PURPLE}运行${NC} ${WHITE}$UPTIME${NC}  ${YELLOW}➤${NC} ${PURPLE}进程${NC} ${WHITE}$PROCESSES${NC}"
     echo ""
+}
+
+# 公网IP获取函数（移出show_system_info，避免重复定义）
+is_private_ip() {
+    [[ $1 =~ ^10\. ]] || \
+    [[ $1 =~ ^192\.168\. ]] || \
+    [[ $1 =~ ^172\.(1[6-9]|2[0-9]|3[0-1])\. ]]
+}
+
+get_public_ipv4() {
+    for api in \
+        "https://api.ipify.org" \
+        "https://ipv4.icanhazip.com" \
+        "https://ipinfo.io/ip" \
+        "https://ip.sb"
+    do
+        ip=$(curl -s --connect-timeout 2 "$api" | tr -d '\n')
+        if [[ $ip =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] && ! is_private_ip "$ip"; then
+            echo "$ip"
+            return
+        fi
+    done
 }
 
 # 功能1：安装常用工具和依赖 🛠️
@@ -1523,9 +1535,9 @@ install_network_tools() {
     read
 }
 
-# 主菜单（无框无横线版）- 添加定时刷新功能
+# 主菜单（无框无横线版）- 系统信息每10秒自动刷新
 while true; do
-    # 每次显示菜单前先显示系统信息
+    # 显示系统信息（第一次）
     show_system_info
     
     # 菜单标题（仅文字）
@@ -1546,12 +1558,18 @@ while true; do
     
     echo ""  # 空行
     
-    # 使用 read -t 实现10秒超时，超时后自动刷新
-    read -t 10 -p "请输入您的选择 [1-21]（10秒后自动刷新）： " main_choice
+    # 使用read -t 10等待用户输入，超时后刷新系统信息
+    # 将光标移动到菜单上方，但不覆盖菜单
+    read -t 10 -p "请输入您的选择 [1-21]（系统信息每10秒自动刷新）： " main_choice
     
     # 检查是否超时（用户没有输入）
     if [ $? -gt 128 ]; then
-        continue  # 超时，重新循环刷新系统信息
+        # 超时，只刷新系统信息部分，不清除菜单
+        # 计算系统信息行数（大约23行）
+        for i in {1..23}; do
+            echo -e "\033[1A\033[K"  # 上移一行并清除
+        done
+        continue  # 重新显示系统信息
     fi
 
     case $main_choice in

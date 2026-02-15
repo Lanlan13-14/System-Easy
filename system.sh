@@ -1542,7 +1542,7 @@ while true; do
     echo -e "${YELLOW}[11]${NC} DDNS 管理 🌐        ${YELLOW}[21]${NC} 退出 🚪"
     
     echo ""  # 空行
-    read -p "请输入您的选择 [1-22]： " main_choice
+    read -p "请输入您的选择 [1-21]： " main_choice
 
     case $main_choice in
         1) install_tools ;;

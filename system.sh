@@ -22,32 +22,39 @@ SCRIPT_URL="https://raw.githubusercontent.com/Lanlan13-14/System-Easy/refs/heads
 # 系统信息显示函数 📊（无框无横线版）
 show_system_info() {
     clear
-    
+
     # --- 静态信息（只在脚本启动时获取）---
     if [ -z "$STATIC_INFO_LOADED" ]; then
-        OS_INFO=$(cat /etc/os-release | grep PRETTY_NAME | cut -d'"' -f2)
+        OS_INFO=$(grep PRETTY_NAME /etc/os-release | cut -d'"' -f2)
         KERNEL=$(uname -r)
         ARCH=$(uname -m)
         HOSTNAME=$(hostname)
         USER=$(whoami)
-        CPU_MODEL=$(lscpu | grep "Model name" | cut -d':' -f2 | xargs)
+        CPU_MODEL=$(lscpu | awk -F: '/Model name/ {print $2}' | xargs)
         CPU_CORES=$(nproc)
         STATIC_INFO_LOADED=1
     fi
-    
+
     # --- 动态信息（每次刷新都更新）---
-    CPU_FREQ=$(lscpu | grep "CPU MHz" | awk '{print $3}' | head -n1)
-    [ -z "$CPU_FREQ" ] && CPU_FREQ=$(lscpu | grep "CPU max MHz" | awk '{print $4}' | head -n1)
-    
+    # 修复 CPU 频率获取（优先实时频率，其次最大频率）
+    CPU_FREQ=$(awk -F: '/cpu MHz/ {print $2; exit}' /proc/cpuinfo | xargs)
+    if [ -z "$CPU_FREQ" ]; then
+        CPU_FREQ=$(lscpu | awk -F: '/CPU MHz/ {print $2}' | xargs)
+    fi
+    if [ -z "$CPU_FREQ" ]; then
+        CPU_FREQ=$(lscpu | awk -F: '/CPU max MHz/ {print $2}' | xargs)
+    fi
+    [ -z "$CPU_FREQ" ] && CPU_FREQ="N/A"
+
     MEM_TOTAL=$(free -m | awk '/^Mem:/{print $2}')
     MEM_USED=$(free -m | awk '/^Mem:/{print $3}')
     MEM_PERCENT=$((MEM_USED * 100 / MEM_TOTAL))
-    
+
     DISK_TOTAL=$(df -BG / | awk 'NR==2 {print $2}' | sed 's/G//')
     DISK_USED=$(df -BG / | awk 'NR==2 {print $3}' | sed 's/G//')
     DISK_PERCENT=$(df / | awk 'NR==2 {print $5}' | sed 's/%//')
-    
-    MAIN_IF=$(ip route | grep default | awk '{print $5}' | head -n1)
+
+    MAIN_IF=$(ip route | awk '/default/ {print $5; exit}')
     if [ -n "$MAIN_IF" ] && [ -f "/sys/class/net/$MAIN_IF/statistics/rx_bytes" ]; then
         RX_BYTES=$(cat /sys/class/net/$MAIN_IF/statistics/rx_bytes)
         TX_BYTES=$(cat /sys/class/net/$MAIN_IF/statistics/tx_bytes)
@@ -57,61 +64,68 @@ show_system_info() {
         RX_READABLE="N/A"
         TX_READABLE="N/A"
     fi
-    
+
     LOAD_1=$(uptime | awk -F'load average:' '{print $2}' | awk -F, '{print $1}' | xargs)
     LOAD_5=$(uptime | awk -F'load average:' '{print $2}' | awk -F, '{print $2}' | xargs)
     LOAD_15=$(uptime | awk -F'load average:' '{print $2}' | awk -F, '{print $3}' | xargs)
     LOAD_1_PERCENT=$(awk "BEGIN {printf \"%.0f\", ($LOAD_1 / $CPU_CORES) * 100}")
-    [ $LOAD_1_PERCENT -gt 100 ] && LOAD_1_PERCENT=100
-    
+    [ "$LOAD_1_PERCENT" -gt 100 ] && LOAD_1_PERCENT=100
+
     PROCESSES=$(ps aux | wc -l)
     UPTIME=$(uptime -p | sed 's/up //')
-    
-    # --- 获取公网 IP（使用 ip.sb）---
-    IPV4_PUBLIC=$(curl -4 -s --connect-timeout 3 https://ip.sb 2>/dev/null)
-    if [ -n "$IPV4_PUBLIC" ] && [[ "$IPV4_PUBLIC" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+
+    # --- 修复公网 IP 获取（多源回退，更可靠）---
+    get_ipv4() {
+        for api in "https://api.ipify.org" "https://ip.sb" "https://ipv4.icanhazip.com"; do
+            ip=$(curl -4 -s --connect-timeout 2 "$api" 2>/dev/null | tr -d '\n')
+            if [[ $ip =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
+                echo "$ip"
+                return
+            fi
+        done
+        echo ""
+    }
+
+    get_ipv6() {
+        for api in "https://api64.ipify.org" "https://ip.sb" "https://ipv6.icanhazip.com"; do
+            ip=$(curl -6 -s --connect-timeout 2 "$api" 2>/dev/null | tr -d '\n')
+            if [[ $ip =~ ^[0-9a-fA-F:]+$ ]]; then
+                echo "$ip"
+                return
+            fi
+        done
+        echo ""
+    }
+
+    IPV4_PUBLIC=$(get_ipv4)
+    if [ -n "$IPV4_PUBLIC" ]; then
         IPV4_DISPLAY="$IPV4_PUBLIC"
     else
         IPV4_LOCAL=$(ip -4 addr show | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | grep -v '^127\.' | head -n1)
         IPV4_DISPLAY="${IPV4_LOCAL:-未分配} (本地)"
     fi
-    
-    IPV6_PUBLIC=$(curl -6 -s --connect-timeout 3 https://ip.sb 2>/dev/null)
-    if [ -n "$IPV6_PUBLIC" ] && [[ "$IPV6_PUBLIC" =~ ^[0-9a-f:]+$ ]]; then
+
+    IPV6_PUBLIC=$(get_ipv6)
+    if [ -n "$IPV6_PUBLIC" ]; then
         IPV6_DISPLAY="$IPV6_PUBLIC"
     else
         IPV6_LOCAL=$(ip -6 addr show | grep -oP '(?<=inet6\s)[0-9a-f:]+' | grep -v '^::1' | grep -v '^fe80' | head -n1)
         IPV6_DISPLAY="${IPV6_LOCAL:-未分配} (本地)"
     fi
-    
-    # --- 打印系统信息（无横线，纯颜色标记）---
-    # 主机和用户
+
+    # --- 打印系统信息 ---
     echo -e "${YELLOW}➤${NC} ${PURPLE}主机${NC} ${WHITE}$HOSTNAME${NC}  ${YELLOW}➤${NC} ${PURPLE}用户${NC} ${WHITE}$USER${NC}"
-    
-    # 系统
     echo -e "${YELLOW}➤${NC} ${PURPLE}系统${NC} ${WHITE}${OS_INFO:0:60}${NC}"
-    
-    # 内核和架构
     echo -e "${YELLOW}➤${NC} ${PURPLE}内核${NC} ${WHITE}$KERNEL${NC}  ${YELLOW}➤${NC} ${PURPLE}架构${NC} ${WHITE}$ARCH${NC}"
-    
-    # IPv4
     echo -e "${YELLOW}➤${NC} ${PURPLE}IPv4${NC} ${WHITE}$IPV4_DISPLAY${NC}"
-    
-    # IPv6
     echo -e "${YELLOW}➤${NC} ${PURPLE}IPv6${NC} ${WHITE}$IPV6_DISPLAY${NC}"
-    
-    # CPU
     echo -e "${YELLOW}➤${NC} ${PURPLE}CPU${NC} ${WHITE}${CPU_MODEL:0:50}${NC}"
     echo -e "  ${CYAN}核心${NC} ${WHITE}$CPU_CORES${NC}  ${CYAN}频率${NC} ${WHITE}$CPU_FREQ MHz${NC}"
-    
-    # 负载（带进度条）
-    if [ $LOAD_1_PERCENT -gt 80 ]; then
-        LOAD_COLOR=$RED
-    elif [ $LOAD_1_PERCENT -gt 50 ]; then
-        LOAD_COLOR=$YELLOW
-    else
-        LOAD_COLOR=$GREEN
-    fi
+
+    # 负载进度条
+    if [ "$LOAD_1_PERCENT" -gt 80 ]; then LOAD_COLOR=$RED
+    elif [ "$LOAD_1_PERCENT" -gt 50 ]; then LOAD_COLOR=$YELLOW
+    else LOAD_COLOR=$GREEN; fi
     LOAD_BAR_WIDTH=30
     LOAD_FILL=$((LOAD_1_PERCENT * LOAD_BAR_WIDTH / 100))
     LOAD_EMPTY=$((LOAD_BAR_WIDTH - LOAD_FILL))
@@ -120,15 +134,11 @@ show_system_info() {
     printf "%0.s█" $(seq 1 $LOAD_FILL)
     printf "%0.s░" $(seq 1 $LOAD_EMPTY)
     printf "] ${LOAD_COLOR}%3d%%${NC}\n" $LOAD_1_PERCENT
-    
-    # 内存（带进度条）
-    if [ $MEM_PERCENT -gt 80 ]; then
-        MEM_COLOR=$RED
-    elif [ $MEM_PERCENT -gt 50 ]; then
-        MEM_COLOR=$YELLOW
-    else
-        MEM_COLOR=$GREEN
-    fi
+
+    # 内存进度条
+    if [ "$MEM_PERCENT" -gt 80 ]; then MEM_COLOR=$RED
+    elif [ "$MEM_PERCENT" -gt 50 ]; then MEM_COLOR=$YELLOW
+    else MEM_COLOR=$GREEN; fi
     MEM_BAR_WIDTH=30
     MEM_FILL=$((MEM_PERCENT * MEM_BAR_WIDTH / 100))
     MEM_EMPTY=$((MEM_BAR_WIDTH - MEM_FILL))
@@ -137,15 +147,11 @@ show_system_info() {
     printf "%0.s█" $(seq 1 $MEM_FILL)
     printf "%0.s░" $(seq 1 $MEM_EMPTY)
     printf "] ${MEM_COLOR}%3d%%${NC}\n" $MEM_PERCENT
-    
-    # 硬盘（带进度条）
-    if [ $DISK_PERCENT -gt 80 ]; then
-        DISK_COLOR=$RED
-    elif [ $DISK_PERCENT -gt 50 ]; then
-        DISK_COLOR=$YELLOW
-    else
-        DISK_COLOR=$GREEN
-    fi
+
+    # 硬盘进度条
+    if [ "$DISK_PERCENT" -gt 80 ]; then DISK_COLOR=$RED
+    elif [ "$DISK_PERCENT" -gt 50 ]; then DISK_COLOR=$YELLOW
+    else DISK_COLOR=$GREEN; fi
     DISK_BAR_WIDTH=30
     DISK_FILL=$((DISK_PERCENT * DISK_BAR_WIDTH / 100))
     DISK_EMPTY=$((DISK_BAR_WIDTH - DISK_FILL))
@@ -154,14 +160,10 @@ show_system_info() {
     printf "%0.s█" $(seq 1 $DISK_FILL)
     printf "%0.s░" $(seq 1 $DISK_EMPTY)
     printf "] ${DISK_COLOR}%3d%%${NC}\n" $DISK_PERCENT
-    
-    # 网络流量
+
     echo -e "${YELLOW}➤${NC} ${PURPLE}网卡${NC} ${WHITE}$MAIN_IF${NC}  ${CYAN}接收${NC} ${WHITE}$RX_READABLE${NC}  ${CYAN}发送${NC} ${WHITE}$TX_READABLE${NC}"
-    
-    # 运行时间和进程
     echo -e "${YELLOW}➤${NC} ${PURPLE}运行${NC} ${WHITE}$UPTIME${NC}  ${YELLOW}➤${NC} ${PURPLE}进程${NC} ${WHITE}$PROCESSES${NC}"
-    
-    echo ""  # 空行分隔
+    echo ""
 }
 
 # 功能1：安装常用工具和依赖 🛠️

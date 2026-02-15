@@ -1521,32 +1521,30 @@ install_network_tools() {
     read
 }
 
-# 功能20：查看系统信息（动态刷新） 🔍
+# 20查看系统信息
 view_system_info() {
-    # 保存终端设置
     old_settings=$(stty -g)
     trap 'stty "$old_settings"; tput cnorm; clear; exit' INT TERM
 
-    stty raw -echo      # 进入原始模式
-    tput civis           # 隐藏光标
+    stty raw -echo
+    tput civis
 
     while true; do
-        tput cup 0 0    # 光标移动到屏幕左上角
-        clear           # 可选：彻底清屏
+        tput clear        # 清屏，彻底覆盖移动端残留
+        tput cup 0 0      # 光标回到左上角
         echo -e "${WHITE}系统信息监控模式 (每10秒刷新，按 q 返回主菜单)${NC}\n"
-        
+
         show_system_info
 
         echo -e "\n${YELLOW}按 q 键返回主菜单...${NC}"
 
-        # 等待用户输入，超时10秒
         if read -t 10 -n 1 key; then
             [[ "$key" =~ [qQ] ]] && break
         fi
     done
 
-    stty "$old_settings"  # 恢复终端设置
-    tput cnorm            # 恢复光标
+    stty "$old_settings"
+    tput cnorm
     clear
 }
 

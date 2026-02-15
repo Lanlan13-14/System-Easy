@@ -1525,34 +1525,25 @@ install_network_tools() {
 view_system_info() {
     old_settings=$(stty -g)
     trap 'stty "$old_settings"; tput cnorm; clear; exit' INT TERM
-
     stty raw -echo
-    tput civis  # 隐藏光标
+    tput civis
+
+    # 限制宽度，和主菜单一致
+    max_width=50
+    max_lines=16
 
     while true; do
         tput clear
         tput cup 0 0
+        echo -e "${WHITE}系统信息监控模式 (按 q 返回主菜单)${NC}\n"
 
-        # 获取终端尺寸
-        cols=$(tput cols)
-        lines=$(tput lines)
-
-        # 左右列宽按比例缩放（左列30%，右列70%）
-        left_width=$((cols*30/100))
-        right_width=$((cols-left_width-3))  # 3 = " : "
-
-        echo -e "${WHITE}系统信息监控模式 (每10秒刷新，按 q 返回主菜单)${NC}\n"
-
-        # 捕获 show_system_info 的输出
         info_lines=()
         while IFS= read -r line; do
-            # 截断超出右列宽度部分（避免移动端换行）
-            info_lines+=("${line:0:cols}")
+            # 截断行，限制宽度
+            info_lines+=("${line:0:max_width}")
         done < <(show_system_info)
 
-        # 输出到屏幕，并保证固定行数（填充到 lines-3，留3行给标题和提示）
-        max_output_lines=$((lines-3))
-        for ((i=0;i<max_output_lines;i++)); do
+        for ((i=0;i<max_lines;i++)); do
             if [ $i -lt ${#info_lines[@]} ]; then
                 printf "%s\n" "${info_lines[$i]}"
             else
@@ -1560,10 +1551,8 @@ view_system_info() {
             fi
         done
 
-        # 底部提示
         echo -e "${YELLOW}按 q 键返回主菜单...${NC}"
 
-        # 等待用户输入，10秒刷新一次
         if read -t 10 -n 1 key; then
             [[ "$key" =~ [qQ] ]] && break
         fi

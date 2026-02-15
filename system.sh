@@ -1522,103 +1522,94 @@ tfo_menu() {
 while true; do
     # 每次显示菜单前先显示系统信息
     show_system_info
-    
+
     # 获取终端宽度
     TERM_WIDTH=$(tput cols 2>/dev/null || echo 80)
-    
-    # 菜单标题 - 使用新配色
+
+    # 菜单标题
     echo -e "${COLOR_BORDER}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo -e "${COLOR_PRIMARY}                        功 能 菜 单                              ${NC}"
     echo -e "${COLOR_BORDER}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    
-    # 判断终端宽度，选择合适的菜单布局
+
+    # ============================
+    #   宽屏（≥100）三列高密度布局
+    # ============================
     if [ $TERM_WIDTH -ge 100 ]; then
-        # 宽屏：三列布局
-        echo -e "${COLOR_BORDER}┌─────────────────────┬─────────────────────┬─────────────────────┐${NC}"
-        echo -e "${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[1]${NC} 安装常用工具 🛠️  ${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[8]${NC} SSH密钥登录 🔑  ${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[15]${NC} CPU占用最大 🖥️${COLOR_BORDER}│${NC}"
-        echo -e "${COLOR_BORDER}├─────────────────────┼─────────────────────┼─────────────────────┤${NC}"
-        echo -e "${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[2]${NC} 日志清理管理 🗑️  ${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[9]${NC} 卸载脚本 🗑️     ${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[16]${NC} 系统定时重启 🔄${COLOR_BORDER}│${NC}"
-        echo -e "${COLOR_BORDER}├─────────────────────┼─────────────────────┼─────────────────────┤${NC}"
-        echo -e "${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[3]${NC} BBR管理 ⚡        ${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[10]${NC} 时区时间同步 ⏰ ${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[17]${NC} Cron任务管理 ⏰${COLOR_BORDER}│${NC}"
-        echo -e "${COLOR_BORDER}├─────────────────────┼─────────────────────┼─────────────────────┤${NC}"
-        echo -e "${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[4]${NC} DNS管理 🌐       ${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[11]${NC} DDNS管理 🌐     ${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[18]${NC} SWAP管理 💾    ${COLOR_BORDER}│${NC}"
-        echo -e "${COLOR_BORDER}├─────────────────────┼─────────────────────┼─────────────────────┤${NC}"
-        echo -e "${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[5]${NC} 修改主机名 🖥️    ${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[12]${NC} 更新脚本 📥     ${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[19]${NC} TFO管理 🚀     ${COLOR_BORDER}│${NC}"
-        echo -e "${COLOR_BORDER}├─────────────────────┼─────────────────────┼─────────────────────┤${NC}"
-        echo -e "${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[6]${NC} SSH端口管理 🔒   ${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[13]${NC} 查看端口占用 🔍 ${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[20]${NC} 退出 🚪        ${COLOR_BORDER}│${NC}"
-        echo -e "${COLOR_BORDER}├─────────────────────┼─────────────────────┼─────────────────────┤${NC}"
-        echo -e "${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[7]${NC} 修改SSH密码 🔑   ${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[14]${NC} 内存占用最大 💾 ${COLOR_BORDER}│${NC}                     ${COLOR_BORDER}│${NC}"
-        echo -e "${COLOR_BORDER}└─────────────────────┴─────────────────────┴─────────────────────┘${NC}"
-        
+        echo -e "${COLOR_BORDER}┌───────────────┬───────────────┬───────────────┐${NC}"
+        echo -e "${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[1]${NC} 工具安装 🛠️   ${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[8]${NC} SSH密钥 🔑   ${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[15]${NC} CPU最大 🖥️ ${COLOR_BORDER}│${NC}"
+        echo -e "${COLOR_BORDER}├───────────────┼───────────────┼───────────────┤${NC}"
+        echo -e "${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[2]${NC} 日志清理 🗑️   ${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[9]${NC} 卸载脚本 🗑️  ${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[16]${NC} 定时重启 🔄 ${COLOR_BORDER}│${NC}"
+        echo -e "${COLOR_BORDER}├───────────────┼───────────────┼───────────────┤${NC}"
+        echo -e "${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[3]${NC} BBR管理 ⚡     ${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[10]${NC} 时区同步 ⏰  ${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[17]${NC} Cron任务 ⏰ ${COLOR_BORDER}│${NC}"
+        echo -e "${COLOR_BORDER}├───────────────┼───────────────┼───────────────┤${NC}"
+        echo -e "${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[4]${NC} DNS管理 🌐    ${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[11]${NC} DDNS管理 🌐  ${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[18]${NC} SWAP管理 💾 ${COLOR_BORDER}│${NC}"
+        echo -e "${COLOR_BORDER}├───────────────┼───────────────┼───────────────┤${NC}"
+        echo -e "${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[5]${NC} 主机名 🖥️     ${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[12]${NC} 更新脚本 📥  ${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[19]${NC} TFO 🚀      ${COLOR_BORDER}│${NC}"
+        echo -e "${COLOR_BORDER}├───────────────┼───────────────┼───────────────┤${NC}"
+        echo -e "${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[6]${NC} SSH端口 🔒    ${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[13]${NC} 端口占用 🔍  ${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[20]${NC} 退出 🚪     ${COLOR_BORDER}│${NC}"
+        echo -e "${COLOR_BORDER}├───────────────┼───────────────┼───────────────┤${NC}"
+        echo -e "${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[7]${NC} SSH密码 🔑    ${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[14]${NC} 内存最大 💾  ${COLOR_BORDER}│${NC}               ${COLOR_BORDER}│${NC}"
+        echo -e "${COLOR_BORDER}└───────────────┴───────────────┴───────────────┘${NC}"
+
+    # ============================
+    #   中屏（70–99）两列高密度布局
+    # ============================
     elif [ $TERM_WIDTH -ge 70 ]; then
-        # 中屏：两列布局（您原来的样式，但使用新配色）
-        echo -e "${COLOR_BORDER}┌───────────────────────┬───────────────────────┐${NC}"
-        echo -e "${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[1]${NC} 安装常用工具 🛠️       ${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[11]${NC} DDNS 管理 🌐      ${COLOR_BORDER}│${NC}"
-        echo -e "${COLOR_BORDER}├───────────────────────┼───────────────────────┤${NC}"
-        echo -e "${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[2]${NC} 日志清理管理 🗑️       ${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[12]${NC} 更新脚本 📥       ${COLOR_BORDER}│${NC}"
-        echo -e "${COLOR_BORDER}├───────────────────────┼───────────────────────┤${NC}"
-        echo -e "${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[3]${NC} BBR管理 ⚡            ${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[13]${NC} 查看端口占用 🔍   ${COLOR_BORDER}│${NC}"
-        echo -e "${COLOR_BORDER}├───────────────────────┼───────────────────────┤${NC}"
-        echo -e "${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[4]${NC} DNS管理 🌐           ${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[14]${NC} 内存占用最大 💾   ${COLOR_BORDER}│${NC}"
-        echo -e "${COLOR_BORDER}├───────────────────────┼───────────────────────┤${NC}"
-        echo -e "${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[5]${NC} 修改主机名 🖥️        ${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[15]${NC} CPU占用最大 🖥️    ${COLOR_BORDER}│${NC}"
-        echo -e "${COLOR_BORDER}├───────────────────────┼───────────────────────┤${NC}"
-        echo -e "${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[6]${NC} SSH端口管理 🔒       ${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[16]${NC} 系统定时重启 🔄   ${COLOR_BORDER}│${NC}"
-        echo -e "${COLOR_BORDER}├───────────────────────┼───────────────────────┤${NC}"
-        echo -e "${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[7]${NC} 修改SSH密码 🔑       ${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[17]${NC} Cron任务管理 ⏰    ${COLOR_BORDER}│${NC}"
-        echo -e "${COLOR_BORDER}├───────────────────────┼───────────────────────┤${NC}"
-        echo -e "${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[8]${NC} SSH密钥登录管理 🔑   ${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[18]${NC} SWAP管理 💾        ${COLOR_BORDER}│${NC}"
-        echo -e "${COLOR_BORDER}├───────────────────────┼───────────────────────┤${NC}"
-        echo -e "${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[9]${NC} 卸载脚本 🗑️          ${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[19]${NC} TFO管理 🚀         ${COLOR_BORDER}│${NC}"
-        echo -e "${COLOR_BORDER}├───────────────────────┼───────────────────────┤${NC}"
-        echo -e "${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[10]${NC} 时区时间同步 ⏰      ${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[20]${NC} 退出 🚪            ${COLOR_BORDER}│${NC}"
-        echo -e "${COLOR_BORDER}└───────────────────────┴───────────────────────┘${NC}"
-        
+        echo -e "${COLOR_BORDER}┌────────────────────┬────────────────────┐${NC}"
+        echo -e "${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[1]${NC} 工具安装 🛠️      ${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[11]${NC} DDNS管理 🌐     ${COLOR_BORDER}│${NC}"
+        echo -e "${COLOR_BORDER}├────────────────────┼────────────────────┤${NC}"
+        echo -e "${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[2]${NC} 日志清理 🗑️      ${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[12]${NC} 更新脚本 📥     ${COLOR_BORDER}│${NC}"
+        echo -e "${COLOR_BORDER}├────────────────────┼────────────────────┤${NC}"
+        echo -e "${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[3]${NC} BBR管理 ⚡        ${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[13]${NC} 端口占用 🔍     ${COLOR_BORDER}│${NC}"
+        echo -e "${COLOR_BORDER}├────────────────────┼────────────────────┤${NC}"
+        echo -e "${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[4]${NC} DNS管理 🌐       ${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[14]${NC} 内存最大 💾     ${COLOR_BORDER}│${NC}"
+        echo -e "${COLOR_BORDER}├────────────────────┼────────────────────┤${NC}"
+        echo -e "${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[5]${NC} 主机名 🖥️        ${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[15]${NC} CPU最大 🖥️     ${COLOR_BORDER}│${NC}"
+        echo -e "${COLOR_BORDER}├────────────────────┼────────────────────┤${NC}"
+        echo -e "${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[6]${NC} SSH端口 🔒       ${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[16]${NC} 定时重启 🔄     ${COLOR_BORDER}│${NC}"
+        echo -e "${COLOR_BORDER}├────────────────────┼────────────────────┤${NC}"
+        echo -e "${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[7]${NC} SSH密码 🔑       ${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[17]${NC} Cron任务 ⏰     ${COLOR_BORDER}│${NC}"
+        echo -e "${COLOR_BORDER}├────────────────────┼────────────────────┤${NC}"
+        echo -e "${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[8]${NC} SSH密钥 🔑       ${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[18]${NC} SWAP管理 💾     ${COLOR_BORDER}│${NC}"
+        echo -e "${COLOR_BORDER}├────────────────────┼────────────────────┤${NC}"
+        echo -e "${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[9]${NC} 卸载脚本 🗑️      ${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[19]${NC} TFO 🚀         ${COLOR_BORDER}│${NC}"
+        echo -e "${COLOR_BORDER}├────────────────────┼────────────────────┤${NC}"
+        echo -e "${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[10]${NC} 时区同步 ⏰      ${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[20]${NC} 退出 🚪         ${COLOR_BORDER}│${NC}"
+        echo -e "${COLOR_BORDER}└────────────────────┴────────────────────┘${NC}"
+
+    # ============================
+    #   窄屏（<70）单列极致紧凑布局
+    # ============================
     else
-        # 窄屏：单列布局
-        echo -e "${COLOR_BORDER}┌─────────────────────────────────┐${NC}"
-        echo -e "${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[1]${NC} 安装常用工具 🛠️       ${COLOR_BORDER}│${NC}"
-        echo -e "${COLOR_BORDER}├─────────────────────────────────┤${NC}"
-        echo -e "${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[2]${NC} 日志清理管理 🗑️       ${COLOR_BORDER}│${NC}"
-        echo -e "${COLOR_BORDER}├─────────────────────────────────┤${NC}"
-        echo -e "${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[3]${NC} BBR管理 ⚡            ${COLOR_BORDER}│${NC}"
-        echo -e "${COLOR_BORDER}├─────────────────────────────────┤${NC}"
-        echo -e "${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[4]${NC} DNS管理 🌐           ${COLOR_BORDER}│${NC}"
-        echo -e "${COLOR_BORDER}├─────────────────────────────────┤${NC}"
-        echo -e "${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[5]${NC} 修改主机名 🖥️        ${COLOR_BORDER}│${NC}"
-        echo -e "${COLOR_BORDER}├─────────────────────────────────┤${NC}"
-        echo -e "${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[6]${NC} SSH端口管理 🔒       ${COLOR_BORDER}│${NC}"
-        echo -e "${COLOR_BORDER}├─────────────────────────────────┤${NC}"
-        echo -e "${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[7]${NC} 修改SSH密码 🔑       ${COLOR_BORDER}│${NC}"
-        echo -e "${COLOR_BORDER}├─────────────────────────────────┤${NC}"
-        echo -e "${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[8]${NC} SSH密钥登录管理 🔑   ${COLOR_BORDER}│${NC}"
-        echo -e "${COLOR_BORDER}├─────────────────────────────────┤${NC}"
-        echo -e "${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[9]${NC} 卸载脚本 🗑️          ${COLOR_BORDER}│${NC}"
-        echo -e "${COLOR_BORDER}├─────────────────────────────────┤${NC}"
-        echo -e "${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[10]${NC} 时区时间同步 ⏰      ${COLOR_BORDER}│${NC}"
-        echo -e "${COLOR_BORDER}├─────────────────────────────────┤${NC}"
-        echo -e "${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[11]${NC} DDNS 管理 🌐        ${COLOR_BORDER}│${NC}"
-        echo -e "${COLOR_BORDER}├─────────────────────────────────┤${NC}"
-        echo -e "${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[12]${NC} 更新脚本 📥         ${COLOR_BORDER}│${NC}"
-        echo -e "${COLOR_BORDER}├─────────────────────────────────┤${NC}"
-        echo -e "${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[13]${NC} 查看端口占用 🔍     ${COLOR_BORDER}│${NC}"
-        echo -e "${COLOR_BORDER}├─────────────────────────────────┤${NC}"
-        echo -e "${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[14]${NC} 内存占用最大 💾     ${COLOR_BORDER}│${NC}"
-        echo -e "${COLOR_BORDER}├─────────────────────────────────┤${NC}"
-        echo -e "${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[15]${NC} CPU占用最大 🖥️      ${COLOR_BORDER}│${NC}"
-        echo -e "${COLOR_BORDER}├─────────────────────────────────┤${NC}"
-        echo -e "${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[16]${NC} 系统定时重启 🔄     ${COLOR_BORDER}│${NC}"
-        echo -e "${COLOR_BORDER}├─────────────────────────────────┤${NC}"
-        echo -e "${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[17]${NC} Cron任务管理 ⏰      ${COLOR_BORDER}│${NC}"
-        echo -e "${COLOR_BORDER}├─────────────────────────────────┤${NC}"
-        echo -e "${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[18]${NC} SWAP管理 💾         ${COLOR_BORDER}│${NC}"
-        echo -e "${COLOR_BORDER}├─────────────────────────────────┤${NC}"
-        echo -e "${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[19]${NC} TFO管理 🚀          ${COLOR_BORDER}│${NC}"
-        echo -e "${COLOR_BORDER}├─────────────────────────────────┤${NC}"
-        echo -e "${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[20]${NC} 退出 🚪             ${COLOR_BORDER}│${NC}"
-        echo -e "${COLOR_BORDER}└─────────────────────────────────┘${NC}"
+        echo -e "${COLOR_BORDER}┌──────────────────────┐${NC}"
+        for item in \
+            "1 工具安装 🛠️" \
+            "2 日志清理 🗑️" \
+            "3 BBR管理 ⚡" \
+            "4 DNS管理 🌐" \
+            "5 主机名 🖥️" \
+            "6 SSH端口 🔒" \
+            "7 SSH密码 🔑" \
+            "8 SSH密钥 🔑" \
+            "9 卸载脚本 🗑️" \
+            "10 时区同步 ⏰" \
+            "11 DDNS管理 🌐" \
+            "12 更新脚本 📥" \
+            "13 端口占用 🔍" \
+            "14 内存最大 💾" \
+            "15 CPU最大 🖥️" \
+            "16 定时重启 🔄" \
+            "17 Cron任务 ⏰" \
+            "18 SWAP管理 💾" \
+            "19 TFO 🚀" \
+            "20 退出 🚪"
+        do
+            echo -e "${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[${item%% *}]${NC} ${item#* } ${COLOR_BORDER}│${NC}"
+            echo -e "${COLOR_BORDER}├──────────────────────┤${NC}"
+        done
+        echo -e "${COLOR_BORDER}└──────────────────────┘${NC}"
     fi
-    
+
     echo -e "${COLOR_BORDER}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo -e "${COLOR_INFO}请输入您的选择 [1-20]：${NC} "
     read -p "" main_choice

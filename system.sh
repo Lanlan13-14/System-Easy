@@ -1,9 +1,164 @@
 #!/bin/bash
+
+# 系统信息显示函数 📊
+show_system_info() {
+    clear
+    # 获取系统信息
+    OS_INFO=$(cat /etc/os-release | grep PRETTY_NAME | cut -d'"' -f2)
+    KERNEL=$(uname -r)
+    ARCH=$(uname -m)
+    HOSTNAME=$(hostname)
+    UPTIME=$(uptime -p | sed 's/up //')
+    USER=$(whoami)
+    
+    # CPU信息
+    CPU_MODEL=$(lscpu | grep "Model name" | cut -d':' -f2 | xargs)
+    CPU_CORES=$(nproc)
+    CPU_FREQ=$(lscpu | grep "CPU MHz" | awk '{print $3}' | head -n1)
+    [ -z "$CPU_FREQ" ] && CPU_FREQ=$(lscpu | grep "CPU max MHz" | awk '{print $4}' | head -n1)
+    
+    # 内存信息
+    MEM_TOTAL=$(free -m | awk '/^Mem:/{print $2}')
+    MEM_USED=$(free -m | awk '/^Mem:/{print $3}')
+    MEM_PERCENT=$((MEM_USED * 100 / MEM_TOTAL))
+    
+    # 硬盘信息
+    DISK_TOTAL=$(df -BG / | awk 'NR==2 {print $2}' | sed 's/G//')
+    DISK_USED=$(df -BG / | awk 'NR==2 {print $3}' | sed 's/G//')
+    DISK_PERCENT=$(df / | awk 'NR==2 {print $5}' | sed 's/%//')
+    
+    # 网卡流量
+    MAIN_IF=$(ip route | grep default | awk '{print $5}' | head -n1)
+    if [ -n "$MAIN_IF" ] && [ -f "/sys/class/net/$MAIN_IF/statistics/rx_bytes" ]; then
+        RX_BYTES=$(cat /sys/class/net/$MAIN_IF/statistics/rx_bytes)
+        TX_BYTES=$(cat /sys/class/net/$MAIN_IF/statistics/tx_bytes)
+        RX_READABLE=$(numfmt --to=iec --suffix=B $RX_BYTES 2>/dev/null || echo "N/A")
+        TX_READABLE=$(numfmt --to=iec --suffix=B $TX_BYTES 2>/dev/null || echo "N/A")
+    else
+        RX_READABLE="N/A"
+        TX_READABLE="N/A"
+    fi
+    
+    # 负载信息
+    LOAD_1=$(uptime | awk -F'load average:' '{print $2}' | awk -F, '{print $1}' | xargs)
+    LOAD_5=$(uptime | awk -F'load average:' '{print $2}' | awk -F, '{print $2}' | xargs)
+    LOAD_15=$(uptime | awk -F'load average:' '{print $2}' | awk -F, '{print $3}' | xargs)
+    
+    # 计算负载百分比
+    LOAD_1_PERCENT=$(awk "BEGIN {printf \"%.0f\", ($LOAD_1 / $CPU_CORES) * 100}")
+    [ $LOAD_1_PERCENT -gt 100 ] && LOAD_1_PERCENT=100
+    
+    # 进程数
+    PROCESSES=$(ps aux | wc -l)
+    
+    # 获取IP地址
+    IPV4=$(ip -4 addr show | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | grep -v '^127\.' | head -n1)
+    [ -z "$IPV4" ] && IPV4="未分配"
+    
+    IPV6=$(ip -6 addr show | grep -oP '(?<=inet6\s)[0-9a-f:]+' | grep -v '^::1' | grep -v '^fe80' | head -n1)
+    [ -z "$IPV6" ] && IPV6="未分配"
+    
+    # 颜色定义
+    RED='\033[0;31m'
+    GREEN='\033[0;32m'
+    YELLOW='\033[1;33m'
+    BLUE='\033[0;34m'
+    WHITE='\033[1;37m'
+    NC='\033[0m'
+    
+    # 打印分隔线
+    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    
+    # 系统信息表格
+    echo -e "${YELLOW}┌─────────────────────────────────────────────────────────────────┐${NC}"
+    
+    # 主机和用户
+    printf "${YELLOW}│${NC} ${GREEN}➤${NC} 主机: ${WHITE}%-20s${NC} ${GREEN}➤${NC} 用户: ${WHITE}%-15s${NC} ${YELLOW}│${NC}\n" "$HOSTNAME" "$USER"
+    
+    # 系统信息
+    printf "${YELLOW}│${NC} ${GREEN}➤${NC} 系统: ${WHITE}%-50s${NC} ${YELLOW}│${NC}\n" "${OS_INFO:0:50}"
+    
+    # 内核和架构
+    printf "${YELLOW}│${NC} ${GREEN}➤${NC} 内核: ${WHITE}%-25s${NC} ${GREEN}➤${NC} 架构: ${WHITE}%-10s${NC} ${YELLOW}│${NC}\n" "$KERNEL" "$ARCH"
+    
+    # IP地址
+    printf "${YELLOW}│${NC} ${GREEN}➤${NC} IPv4: ${WHITE}%-15s${NC} ${GREEN}➤${NC} IPv6: ${WHITE}%-20s${NC} ${YELLOW}│${NC}\n" "$IPV4" "$(echo $IPV6 | cut -c1-20)"
+    
+    # CPU信息
+    printf "${YELLOW}│${NC} ${GREEN}➤${NC} CPU: ${WHITE}%-45s${NC} ${YELLOW}│${NC}\n" "${CPU_MODEL:0:45}"
+    printf "${YELLOW}│${NC} ${GREEN}  ${NC} 核心: ${WHITE}%-4s${NC} 频率: ${WHITE}%-8s MHz${NC} ${YELLOW}│${NC}\n" "$CPU_CORES" "$CPU_FREQ"
+    
+    # CPU负载进度条
+    LOAD_BAR_WIDTH=30
+    LOAD_FILL=$((LOAD_1_PERCENT * LOAD_BAR_WIDTH / 100))
+    LOAD_EMPTY=$((LOAD_BAR_WIDTH - LOAD_FILL))
+    
+    if [ $LOAD_1_PERCENT -gt 80 ]; then
+        LOAD_COLOR=$RED
+    elif [ $LOAD_1_PERCENT -gt 50 ]; then
+        LOAD_COLOR=$YELLOW
+    else
+        LOAD_COLOR=$GREEN
+    fi
+    
+    printf "${YELLOW}│${NC} ${GREEN}➤${NC} 负载: ${WHITE}1min: %.2f 5min: %.2f 15min: %.2f${NC} ${YELLOW}│${NC}\n" "$LOAD_1" "$LOAD_5" "$LOAD_15"
+    printf "${YELLOW}│${NC} ${GREEN}  ${NC}      [${LOAD_COLOR}" 
+    printf "%0.s█" $(seq 1 $LOAD_FILL)
+    printf "${NC}%0.s░" $(seq 1 $LOAD_EMPTY)
+    printf "${WHITE}] %3d%%${NC} ${YELLOW}│${NC}\n" $LOAD_1_PERCENT
+    
+    # 内存进度条
+    MEM_BAR_WIDTH=30
+    MEM_FILL=$((MEM_PERCENT * MEM_BAR_WIDTH / 100))
+    MEM_EMPTY=$((MEM_BAR_WIDTH - MEM_FILL))
+    
+    if [ $MEM_PERCENT -gt 80 ]; then
+        MEM_COLOR=$RED
+    elif [ $MEM_PERCENT -gt 50 ]; then
+        MEM_COLOR=$YELLOW
+    else
+        MEM_COLOR=$GREEN
+    fi
+    
+    printf "${YELLOW}│${NC} ${GREEN}➤${NC} 内存: ${WHITE}%4s MB / %4s MB${NC} [${MEM_COLOR}" "$MEM_USED" "$MEM_TOTAL"
+    printf "%0.s█" $(seq 1 $MEM_FILL)
+    printf "${NC}%0.s░" $(seq 1 $MEM_EMPTY)
+    printf "${WHITE}] %3d%%${NC} ${YELLOW}│${NC}\n" $MEM_PERCENT
+    
+    # 硬盘进度条
+    DISK_BAR_WIDTH=30
+    DISK_FILL=$((DISK_PERCENT * DISK_BAR_WIDTH / 100))
+    DISK_EMPTY=$((DISK_BAR_WIDTH - DISK_FILL))
+    
+    if [ $DISK_PERCENT -gt 80 ]; then
+        DISK_COLOR=$RED
+    elif [ $DISK_PERCENT -gt 50 ]; then
+        DISK_COLOR=$YELLOW
+    else
+        DISK_COLOR=$GREEN
+    fi
+    
+    printf "${YELLOW}│${NC} ${GREEN}➤${NC} 硬盘: ${WHITE}%4s GB / %4s GB${NC} [${DISK_COLOR}" "$DISK_USED" "$DISK_TOTAL"
+    printf "%0.s█" $(seq 1 $DISK_FILL)
+    printf "${NC}%0.s░" $(seq 1 $DISK_EMPTY)
+    printf "${WHITE}] %3d%%${NC} ${YELLOW}│${NC}\n" $DISK_PERCENT
+    
+    # 网络流量
+    printf "${YELLOW}│${NC} ${GREEN}➤${NC} 网卡: ${WHITE}%-10s${NC} 接收: ${WHITE}%-10s${NC} 发送: ${WHITE}%-10s${NC} ${YELLOW}│${NC}\n" "$MAIN_IF" "$RX_READABLE" "$TX_READABLE"
+    
+    # 运行时间和进程
+    printf "${YELLOW}│${NC} ${GREEN}➤${NC} 运行: ${WHITE}%-20s${NC} 进程: ${WHITE}%-6s${NC} ${YELLOW}│${NC}\n" "$UPTIME" "$PROCESSES"
+    
+    echo -e "${YELLOW}└─────────────────────────────────────────────────────────────────┘${NC}"
+    echo ""
+}
+
 # 检查是否以root身份运行 🚨
 if [ "$(id -u)" != "0" ]; then
    echo "此脚本必须以root身份运行 🚨" 1>&2
    exit 1
 fi
+
 # 脚本URL
 SCRIPT_URL="https://raw.githubusercontent.com/Lanlan13-14/System-Easy/refs/heads/main/system.sh"
 # 功能1：安装常用工具和依赖 🛠️
@@ -1289,29 +1444,41 @@ tfo_menu() {
 }
 # 主菜单 📋
 while true; do
-    echo "系统维护脚本菜单 📋："
-    echo "[1] 安装常用工具和依赖 🛠️"
-    echo "[2] 日志清理管理 🗑️"
-    echo "[3] BBR管理 ⚡"
-    echo "[4] DNS管理 🌐"
-    echo "[5] 修改主机名 🖥️"
-    echo "[6] SSH端口管理 🔒"
-    echo "[7] 修改SSH密码 🔑"
-    echo "[8] SSH密钥登录管理 🔑"
-    echo "[9] 卸载脚本 🗑️"
-    echo "[10] 设置系统时区与时间同步 ⏰"
-    echo "[11] DDNS 管理 🌐"
-    echo "[12] 更新脚本 📥"
-    echo "[13] 查看端口占用 🔍"
-    echo "[14] 查看内存占用最大程序 💾"
-    echo "[15] 查看CPU占用最大程序 🖥️"
-    echo "[16] 设置系统定时重启 🔄"
-    echo "[17] Cron任务管理 ⏰"
-    echo "[18] SWAP管理 💾"
-    echo "[19] TCP Fast Open (TFO) 管理 🚀"
-    echo "[20] 退出 🚪"
-    read -p "请输入您的选择： " main_choice
+    # 每次显示菜单前先显示系统信息
+    show_system_info
+    
+    # 菜单标题
+    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${WHITE}                        功能菜单                              ${NC}"
+    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    
+    # 菜单选项 - 使用两列布局
+    echo -e "${YELLOW}┌───────────────────────┬───────────────────────┐${NC}"
+    echo -e "${YELLOW}│${NC} ${GREEN}[1]${NC} 安装常用工具 🛠️       ${YELLOW}│${NC} ${GREEN}[11]${NC} DDNS 管理 🌐      ${YELLOW}│${NC}"
+    echo -e "${YELLOW}├───────────────────────┼───────────────────────┤${NC}"
+    echo -e "${YELLOW}│${NC} ${GREEN}[2]${NC} 日志清理管理 🗑️       ${YELLOW}│${NC} ${GREEN}[12]${NC} 更新脚本 📥       ${YELLOW}│${NC}"
+    echo -e "${YELLOW}├───────────────────────┼───────────────────────┤${NC}"
+    echo -e "${YELLOW}│${NC} ${GREEN}[3]${NC} BBR管理 ⚡            ${YELLOW}│${NC} ${GREEN}[13]${NC} 查看端口占用 🔍   ${YELLOW}│${NC}"
+    echo -e "${YELLOW}├───────────────────────┼───────────────────────┤${NC}"
+    echo -e "${YELLOW}│${NC} ${GREEN}[4]${NC} DNS管理 🌐           ${YELLOW}│${NC} ${GREEN}[14]${NC} 内存占用最大 💾   ${YELLOW}│${NC}"
+    echo -e "${YELLOW}├───────────────────────┼───────────────────────┤${NC}"
+    echo -e "${YELLOW}│${NC} ${GREEN}[5]${NC} 修改主机名 🖥️        ${YELLOW}│${NC} ${GREEN}[15]${NC} CPU占用最大 🖥️    ${YELLOW}│${NC}"
+    echo -e "${YELLOW}├───────────────────────┼───────────────────────┤${NC}"
+    echo -e "${YELLOW}│${NC} ${GREEN}[6]${NC} SSH端口管理 🔒       ${YELLOW}│${NC} ${GREEN}[16]${NC} 系统定时重启 🔄   ${YELLOW}│${NC}"
+    echo -e "${YELLOW}├───────────────────────┼───────────────────────┤${NC}"
+    echo -e "${YELLOW}│${NC} ${GREEN}[7]${NC} 修改SSH密码 🔑       ${YELLOW}│${NC} ${GREEN}[17]${NC} Cron任务管理 ⏰    ${YELLOW}│${NC}"
+    echo -e "${YELLOW}├───────────────────────┼───────────────────────┤${NC}"
+    echo -e "${YELLOW}│${NC} ${GREEN}[8]${NC} SSH密钥登录管理 🔑   ${YELLOW}│${NC} ${GREEN}[18]${NC} SWAP管理 💾        ${YELLOW}│${NC}"
+    echo -e "${YELLOW}├───────────────────────┼───────────────────────┤${NC}"
+    echo -e "${YELLOW}│${NC} ${GREEN}[9]${NC} 卸载脚本 🗑️          ${YELLOW}│${NC} ${GREEN}[19]${NC} TFO管理 🚀         ${YELLOW}│${NC}"
+    echo -e "${YELLOW}├───────────────────────┼───────────────────────┤${NC}"
+    echo -e "${YELLOW}│${NC} ${GREEN}[10]${NC} 时区时间同步 ⏰      ${YELLOW}│${NC} ${GREEN}[20]${NC} 退出 🚪            ${YELLOW}│${NC}"
+    echo -e "${YELLOW}└───────────────────────┴───────────────────────┘${NC}"
+    
+    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    read -p "请输入您的选择 [1-20]： " main_choice
 
+    # 这里保持原有的 case 语句不变
     case $main_choice in
         1) install_tools ;;
         2) log_cleanup_menu ;;
@@ -1333,11 +1500,12 @@ while true; do
         18) swap_menu ;;
         19) tfo_menu ;;
         20)
-            echo "👋 已退出，⚡ 下次使用直接运行: sudo system-easy"
+            echo -e "${GREEN}👋 已退出，下次使用直接运行: sudo system-easy${NC}"
             exit 0
             ;;
         *)
-            echo "无效选择，请重试 😕"
+            echo -e "${RED}无效选择，请重试 😕${NC}"
+            sleep 1
             ;;
     esac
 done

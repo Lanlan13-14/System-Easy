@@ -19,7 +19,7 @@ fi
 # 脚本URL
 SCRIPT_URL="https://raw.githubusercontent.com/Lanlan13-14/System-Easy/refs/heads/main/system.sh"
 
-# 系统信息显示函数 📊（无框无横线版）- 支持覆盖刷新
+# 系统信息显示函数 📊（无框无横线版）- 依赖调用者将光标置于顶部，顺序输出16行
 show_system_info() {
     # --- 静态信息（只在脚本启动时获取）---
     if [ -z "$STATIC_INFO_LOADED" ]; then
@@ -109,30 +109,30 @@ show_system_info() {
         IPV6_DISPLAY="未分配 (本地)"
     fi
 
-    # --- 输出动态信息，每行末尾添加清空操作 ---
+    # --- 顺序输出16行，每行末尾清空（依赖调用者已移动光标到顶部）---
     # 第1行：主机和用户
-    printf "\033[1;1H${YELLOW}➤${NC} ${PURPLE}主机${NC} ${WHITE}$HOSTNAME${NC}  ${YELLOW}➤${NC} ${PURPLE}用户${NC} ${WHITE}$USER${NC}\033[K\n"
+    printf "${YELLOW}➤${NC} ${PURPLE}主机${NC} ${WHITE}$HOSTNAME${NC}  ${YELLOW}➤${NC} ${PURPLE}用户${NC} ${WHITE}$USER${NC}\033[K\n"
     
     # 第2行：系统
-    printf "\033[2;1H${YELLOW}➤${NC} ${PURPLE}系统${NC} ${WHITE}${OS_INFO:0:60}${NC}\033[K\n"
+    printf "${YELLOW}➤${NC} ${PURPLE}系统${NC} ${WHITE}${OS_INFO:0:60}${NC}\033[K\n"
     
     # 第3行：内核和架构
-    printf "\033[3;1H${YELLOW}➤${NC} ${PURPLE}内核${NC} ${WHITE}$KERNEL${NC}  ${YELLOW}➤${NC} ${PURPLE}架构${NC} ${WHITE}$ARCH${NC}\033[K\n"
+    printf "${YELLOW}➤${NC} ${PURPLE}内核${NC} ${WHITE}$KERNEL${NC}  ${YELLOW}➤${NC} ${PURPLE}架构${NC} ${WHITE}$ARCH${NC}\033[K\n"
     
     # 第4行：IPv4
-    printf "\033[4;1H${YELLOW}➤${NC} ${PURPLE}IPv4${NC} ${WHITE}$IPV4_DISPLAY${NC}\033[K\n"
+    printf "${YELLOW}➤${NC} ${PURPLE}IPv4${NC} ${WHITE}$IPV4_DISPLAY${NC}\033[K\n"
     
     # 第5行：IPv6
-    printf "\033[5;1H${YELLOW}➤${NC} ${PURPLE}IPv6${NC} ${WHITE}$IPV6_DISPLAY${NC}\033[K\n"
+    printf "${YELLOW}➤${NC} ${PURPLE}IPv6${NC} ${WHITE}$IPV6_DISPLAY${NC}\033[K\n"
     
     # 第6行：CPU型号
-    printf "\033[6;1H${YELLOW}➤${NC} ${PURPLE}CPU${NC} ${WHITE}${CPU_MODEL:0:50}${NC}\033[K\n"
+    printf "${YELLOW}➤${NC} ${PURPLE}CPU${NC} ${WHITE}${CPU_MODEL:0:50}${NC}\033[K\n"
     
     # 第7行：核心和频率
-    printf "\033[7;1H  ${CYAN}核心${NC} ${WHITE}$CPU_CORES${NC}  ${CYAN}频率${NC} ${WHITE}$CPU_FREQ MHz${NC}\033[K\n"
+    printf "  ${CYAN}核心${NC} ${WHITE}$CPU_CORES${NC}  ${CYAN}频率${NC} ${WHITE}$CPU_FREQ MHz${NC}\033[K\n"
 
     # 第8行：负载文字
-    printf "\033[8;1H${YELLOW}➤${NC} ${PURPLE}负载${NC} ${WHITE}1min: $LOAD_1  5min: $LOAD_5  15min: $LOAD_15${NC}\033[K\n"
+    printf "${YELLOW}➤${NC} ${PURPLE}负载${NC} ${WHITE}1min: $LOAD_1  5min: $LOAD_5  15min: $LOAD_15${NC}\033[K\n"
     
     # 第9行：负载条
     if [ "$LOAD_1_PERCENT" -gt 80 ]; then LOAD_COLOR=$RED
@@ -141,13 +141,13 @@ show_system_info() {
     LOAD_BAR_WIDTH=30
     LOAD_FILL=$((LOAD_1_PERCENT * LOAD_BAR_WIDTH / 100))
     LOAD_EMPTY=$((LOAD_BAR_WIDTH - LOAD_FILL))
-    printf "\033[9;1H  ["
+    printf "  ["
     printf "%0.s█" $(seq 1 $LOAD_FILL)
     printf "%0.s░" $(seq 1 $LOAD_EMPTY)
     printf "] ${LOAD_COLOR}%3d%%${NC}\033[K\n" $LOAD_1_PERCENT
 
     # 第10行：内存文字
-    printf "\033[10;1H${YELLOW}➤${NC} ${PURPLE}内存${NC} ${WHITE}${MEM_USED}MB / ${MEM_TOTAL}MB${NC}\033[K\n"
+    printf "${YELLOW}➤${NC} ${PURPLE}内存${NC} ${WHITE}${MEM_USED}MB / ${MEM_TOTAL}MB${NC}\033[K\n"
     
     # 第11行：内存条
     if [ "$MEM_PERCENT" -gt 80 ]; then MEM_COLOR=$RED
@@ -156,13 +156,13 @@ show_system_info() {
     MEM_BAR_WIDTH=30
     MEM_FILL=$((MEM_PERCENT * MEM_BAR_WIDTH / 100))
     MEM_EMPTY=$((MEM_BAR_WIDTH - MEM_FILL))
-    printf "\033[11;1H  ["
+    printf "  ["
     printf "%0.s█" $(seq 1 $MEM_FILL)
     printf "%0.s░" $(seq 1 $MEM_EMPTY)
     printf "] ${MEM_COLOR}%3d%%${NC}\033[K\n" $MEM_PERCENT
 
     # 第12行：硬盘文字
-    printf "\033[12;1H${YELLOW}➤${NC} ${PURPLE}硬盘${NC} ${WHITE}${DISK_USED}GB / ${DISK_TOTAL}GB${NC}\033[K\n"
+    printf "${YELLOW}➤${NC} ${PURPLE}硬盘${NC} ${WHITE}${DISK_USED}GB / ${DISK_TOTAL}GB${NC}\033[K\n"
     
     # 第13行：硬盘条
     if [ "$DISK_PERCENT" -gt 80 ]; then DISK_COLOR=$RED
@@ -171,19 +171,19 @@ show_system_info() {
     DISK_BAR_WIDTH=30
     DISK_FILL=$((DISK_PERCENT * DISK_BAR_WIDTH / 100))
     DISK_EMPTY=$((DISK_BAR_WIDTH - DISK_FILL))
-    printf "\033[13;1H  ["
+    printf "  ["
     printf "%0.s█" $(seq 1 $DISK_FILL)
     printf "%0.s░" $(seq 1 $DISK_EMPTY)
     printf "] ${DISK_COLOR}%3d%%${NC}\033[K\n" $DISK_PERCENT
 
     # 第14行：网卡
-    printf "\033[14;1H${YELLOW}➤${NC} ${PURPLE}网卡${NC} ${WHITE}$MAIN_IF${NC}  ${CYAN}接收${NC} ${WHITE}$RX_READABLE${NC}  ${CYAN}发送${NC} ${WHITE}$TX_READABLE${NC}\033[K\n"
+    printf "${YELLOW}➤${NC} ${PURPLE}网卡${NC} ${WHITE}$MAIN_IF${NC}  ${CYAN}接收${NC} ${WHITE}$RX_READABLE${NC}  ${CYAN}发送${NC} ${WHITE}$TX_READABLE${NC}\033[K\n"
     
     # 第15行：运行和进程
-    printf "\033[15;1H${YELLOW}➤${NC} ${PURPLE}运行${NC} ${WHITE}$UPTIME${NC}  ${YELLOW}➤${NC} ${PURPLE}进程${NC} ${WHITE}$PROCESSES${NC}\033[K\n"
+    printf "${YELLOW}➤${NC} ${PURPLE}运行${NC} ${WHITE}$UPTIME${NC}  ${YELLOW}➤${NC} ${PURPLE}进程${NC} ${WHITE}$PROCESSES${NC}\033[K\n"
     
-    # 第16行：空行（确保固定行数）
-    printf "\033[16;1H\033[K\n"
+    # 第16行：空行（确保固定行数，同时清空可能的多余字符）
+    printf "\033[K\n"
 }
 
 # 功能1：安装常用工具和依赖 🛠️

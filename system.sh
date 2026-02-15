@@ -1530,13 +1530,21 @@ view_system_info() {
     tput civis
 
     while true; do
-        tput clear        # 清屏，彻底覆盖移动端残留
-        tput cup 0 0      # 光标回到左上角
+        tput clear
+        tput cup 0 0
         echo -e "${WHITE}系统信息监控模式 (每10秒刷新，按 q 返回主菜单)${NC}\n"
 
-        show_system_info
+        # 调用 show_system_info 并确保固定输出 20 行
+        show_system_info | head -n 20 | while read -r line; do
+            printf "%-80s\n" "$line"  # 固定宽度 80，空白补齐
+        done
 
-        echo -e "\n${YELLOW}按 q 键返回主菜单...${NC}"
+        # 填充剩余行到 20 行
+        for i in $(seq $(($(tput lines)-21))); do
+            echo ""
+        done
+
+        echo -e "${YELLOW}按 q 键返回主菜单...${NC}"
 
         if read -t 10 -n 1 key; then
             [[ "$key" =~ [qQ] ]] && break

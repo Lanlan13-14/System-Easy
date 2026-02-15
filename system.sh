@@ -2,18 +2,34 @@
 
 # 系统信息显示函数 📊
 show_system_info() {
-    clear
-    # 获取系统信息
-    OS_INFO=$(cat /etc/os-release | grep PRETTY_NAME | cut -d'"' -f2)
-    KERNEL=$(uname -r)
-    ARCH=$(uname -m)
-    HOSTNAME=$(hostname)
-    UPTIME=$(uptime -p | sed 's/up //')
-    USER=$(whoami)
+    # 定义颜色（全新配色）
+    # 主色调：使用更柔和的颜色
+    COLOR_PRIMARY='\033[38;5;39m'      # 亮蓝色 - 主边框
+    COLOR_SUCCESS='\033[38;5;48m'      # 薄荷绿 - 原生IP/正常状态
+    COLOR_WARNING='\033[38;5;214m'     # 橙色 - 任播IP/警告
+    COLOR_DANGER='\033[38;5;196m'       # 亮红色 - 广播IP/危险
+    COLOR_INFO='\033[38;5;99m'          # 紫色 - 信息标签
+    COLOR_TEXT='\033[38;5;255m'         # 亮白色 - 主要文字
+    COLOR_DIM='\033[38;5;244m'           # 灰色 - 辅助文字
+    COLOR_BORDER='\033[38;5;240m'        # 深灰色 - 边框
+    NC='\033[0m'                         # 重置颜色
     
-    # CPU信息
-    CPU_MODEL=$(lscpu | grep "Model name" | cut -d':' -f2 | xargs)
-    CPU_CORES=$(nproc)
+    clear
+    
+    # --- 静态信息（只在脚本启动时获取）---
+    if [ -z "$STATIC_INFO_LOADED" ]; then
+        OS_INFO=$(cat /etc/os-release | grep PRETTY_NAME | cut -d'"' -f2)
+        KERNEL=$(uname -r)
+        ARCH=$(uname -m)
+        HOSTNAME=$(hostname)
+        USER=$(whoami)
+        CPU_MODEL=$(lscpu | grep "Model name" | cut -d':' -f2 | xargs)
+        CPU_CORES=$(nproc)
+        STATIC_INFO_LOADED=1
+    fi
+    
+    # --- 动态信息（每次刷新都更新）---
+    # CPU频率
     CPU_FREQ=$(lscpu | grep "CPU MHz" | awk '{print $3}' | head -n1)
     [ -z "$CPU_FREQ" ] && CPU_FREQ=$(lscpu | grep "CPU max MHz" | awk '{print $4}' | head -n1)
     
@@ -51,106 +67,165 @@ show_system_info() {
     # 进程数
     PROCESSES=$(ps aux | wc -l)
     
-    # 获取IP地址
+    # 运行时间
+    UPTIME=$(uptime -p | sed 's/up //')
+    
+    # 获取终端宽度
+    TERM_WIDTH=$(tput cols 2>/dev/null || echo 80)
+    # 设置内容最大宽度（不超过终端宽度）
+    MAX_WIDTH=$((TERM_WIDTH < 80 ? TERM_WIDTH : 80))
+    
+    # --- IP地址及类型判断（使用API）---
+    # IPv4
     IPV4=$(ip -4 addr show | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | grep -v '^127\.' | head -n1)
-    [ -z "$IPV4" ] && IPV4="未分配"
+    if [ -n "$IPV4" ]; then
+        IPV4_TYPE=$(get_ip_type "$IPV4")
+        IPV4_DISPLAY="$IPV4"
+        IPV4_TYPE_DISPLAY="$IPV4_TYPE"
+    else
+        IPV4_DISPLAY="未分配"
+        IPV4_TYPE_DISPLAY=""
+    fi
     
+    # IPv6
     IPV6=$(ip -6 addr show | grep -oP '(?<=inet6\s)[0-9a-f:]+' | grep -v '^::1' | grep -v '^fe80' | head -n1)
-    [ -z "$IPV6" ] && IPV6="未分配"
+    if [ -n "$IPV6" ]; then
+        IPV6_TYPE=$(get_ip_type "$IPV6")
+        IPV6_DISPLAY="$IPV6"
+        IPV6_TYPE_DISPLAY="$IPV6_TYPE"
+    else
+        IPV6_DISPLAY="未分配"
+        IPV6_TYPE_DISPLAY=""
+    fi
     
-    # 颜色定义
-    RED='\033[0;31m'
-    GREEN='\033[0;32m'
-    YELLOW='\033[1;33m'
-    BLUE='\033[0;34m'
-    WHITE='\033[1;37m'
-    NC='\033[0m'
-    
-    # 打印分隔线
-    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    
-    # 系统信息表格
-    echo -e "${YELLOW}┌─────────────────────────────────────────────────────────────────┐${NC}"
+    # --- 显示系统信息（简洁的线条边框）---
+    echo -e "${COLOR_BORDER}┌─────────────────────────────────────────────────────────────────┐${NC}"
     
     # 主机和用户
-    printf "${YELLOW}│${NC} ${GREEN}➤${NC} 主机: ${WHITE}%-20s${NC} ${GREEN}➤${NC} 用户: ${WHITE}%-15s${NC} ${YELLOW}│${NC}\n" "$HOSTNAME" "$USER"
+    printf "${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}●${NC} ${COLOR_INFO}主机${NC} ${COLOR_TEXT}%-20s${NC} ${COLOR_PRIMARY}●${NC} ${COLOR_INFO}用户${NC} ${COLOR_TEXT}%-15s${NC} ${COLOR_BORDER}│${NC}\n" "$HOSTNAME" "$USER"
     
     # 系统信息
-    printf "${YELLOW}│${NC} ${GREEN}➤${NC} 系统: ${WHITE}%-50s${NC} ${YELLOW}│${NC}\n" "${OS_INFO:0:50}"
+    printf "${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}●${NC} ${COLOR_INFO}系统${NC} ${COLOR_TEXT}%-50s${NC} ${COLOR_BORDER}│${NC}\n" "${OS_INFO:0:50}"
     
     # 内核和架构
-    printf "${YELLOW}│${NC} ${GREEN}➤${NC} 内核: ${WHITE}%-25s${NC} ${GREEN}➤${NC} 架构: ${WHITE}%-10s${NC} ${YELLOW}│${NC}\n" "$KERNEL" "$ARCH"
+    printf "${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}●${NC} ${COLOR_INFO}内核${NC} ${COLOR_TEXT}%-25s${NC} ${COLOR_PRIMARY}●${NC} ${COLOR_INFO}架构${NC} ${COLOR_TEXT}%-10s${NC} ${COLOR_BORDER}│${NC}\n" "$KERNEL" "$ARCH"
     
-    # IP地址
-    printf "${YELLOW}│${NC} ${GREEN}➤${NC} IPv4: ${WHITE}%-15s${NC} ${GREEN}➤${NC} IPv6: ${WHITE}%-20s${NC} ${YELLOW}│${NC}\n" "$IPV4" "$(echo $IPV6 | cut -c1-20)"
+    # IPv4地址
+    printf "${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}●${NC} ${COLOR_INFO}IPv4${NC} ${COLOR_TEXT}%s${NC} " "$IPV4_DISPLAY"
+    if [ -n "$IPV4_TYPE_DISPLAY" ]; then
+        echo -e "$IPV4_TYPE_DISPLAY"
+    else
+        echo -e "${COLOR_BORDER}│${NC}"
+    fi
+    
+    # IPv6地址
+    printf "${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}●${NC} ${COLOR_INFO}IPv6${NC} ${COLOR_TEXT}%s${NC} " "$IPV6_DISPLAY"
+    if [ -n "$IPV6_TYPE_DISPLAY" ]; then
+        echo -e "$IPV6_TYPE_DISPLAY"
+    else
+        echo -e "${COLOR_BORDER}│${NC}"
+    fi
     
     # CPU信息
-    printf "${YELLOW}│${NC} ${GREEN}➤${NC} CPU: ${WHITE}%-45s${NC} ${YELLOW}│${NC}\n" "${CPU_MODEL:0:45}"
-    printf "${YELLOW}│${NC} ${GREEN}  ${NC} 核心: ${WHITE}%-4s${NC} 频率: ${WHITE}%-8s MHz${NC} ${YELLOW}│${NC}\n" "$CPU_CORES" "$CPU_FREQ"
+    printf "${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}●${NC} ${COLOR_INFO}CPU${NC}  ${COLOR_TEXT}%-45s${NC} ${COLOR_BORDER}│${NC}\n" "${CPU_MODEL:0:45}"
+    printf "${COLOR_BORDER}│${NC} ${COLOR_DIM}  ├─ 核心${NC} ${COLOR_TEXT}%-4s${NC} ${COLOR_DIM}频率${NC} ${COLOR_TEXT}%-8s MHz${NC} ${COLOR_BORDER}│${NC}\n" "$CPU_CORES" "$CPU_FREQ"
     
     # CPU负载进度条
-    LOAD_BAR_WIDTH=30
+    LOAD_BAR_WIDTH=25
     LOAD_FILL=$((LOAD_1_PERCENT * LOAD_BAR_WIDTH / 100))
     LOAD_EMPTY=$((LOAD_BAR_WIDTH - LOAD_FILL))
     
     if [ $LOAD_1_PERCENT -gt 80 ]; then
-        LOAD_COLOR=$RED
+        LOAD_COLOR=$COLOR_DANGER
     elif [ $LOAD_1_PERCENT -gt 50 ]; then
-        LOAD_COLOR=$YELLOW
+        LOAD_COLOR=$COLOR_WARNING
     else
-        LOAD_COLOR=$GREEN
+        LOAD_COLOR=$COLOR_SUCCESS
     fi
     
-    printf "${YELLOW}│${NC} ${GREEN}➤${NC} 负载: ${WHITE}1min: %.2f 5min: %.2f 15min: %.2f${NC} ${YELLOW}│${NC}\n" "$LOAD_1" "$LOAD_5" "$LOAD_15"
-    printf "${YELLOW}│${NC} ${GREEN}  ${NC}      [${LOAD_COLOR}" 
+    printf "${COLOR_BORDER}│${NC} ${COLOR_DIM}  ├─ 负载${NC} ${COLOR_TEXT}1min: %.2f 5min: %.2f 15min: %.2f${NC}\n" "$LOAD_1" "$LOAD_5" "$LOAD_15"
+    printf "${COLOR_BORDER}│${NC} ${COLOR_DIM}  │  ${NC} [${LOAD_COLOR}" 
     printf "%0.s█" $(seq 1 $LOAD_FILL)
     printf "${NC}%0.s░" $(seq 1 $LOAD_EMPTY)
-    printf "${WHITE}] %3d%%${NC} ${YELLOW}│${NC}\n" $LOAD_1_PERCENT
+    printf "${NC}] ${LOAD_COLOR}%3d%%${NC} ${COLOR_BORDER}│${NC}\n" $LOAD_1_PERCENT
     
     # 内存进度条
-    MEM_BAR_WIDTH=30
+    MEM_BAR_WIDTH=25
     MEM_FILL=$((MEM_PERCENT * MEM_BAR_WIDTH / 100))
     MEM_EMPTY=$((MEM_BAR_WIDTH - MEM_FILL))
     
     if [ $MEM_PERCENT -gt 80 ]; then
-        MEM_COLOR=$RED
+        MEM_COLOR=$COLOR_DANGER
     elif [ $MEM_PERCENT -gt 50 ]; then
-        MEM_COLOR=$YELLOW
+        MEM_COLOR=$COLOR_WARNING
     else
-        MEM_COLOR=$GREEN
+        MEM_COLOR=$COLOR_SUCCESS
     fi
     
-    printf "${YELLOW}│${NC} ${GREEN}➤${NC} 内存: ${WHITE}%4s MB / %4s MB${NC} [${MEM_COLOR}" "$MEM_USED" "$MEM_TOTAL"
+    printf "${COLOR_BORDER}│${NC} ${COLOR_DIM}  ├─ 内存${NC} ${COLOR_TEXT}%4s MB / %4s MB${NC} [${MEM_COLOR}" "$MEM_USED" "$MEM_TOTAL"
     printf "%0.s█" $(seq 1 $MEM_FILL)
     printf "${NC}%0.s░" $(seq 1 $MEM_EMPTY)
-    printf "${WHITE}] %3d%%${NC} ${YELLOW}│${NC}\n" $MEM_PERCENT
+    printf "${NC}] ${MEM_COLOR}%3d%%${NC} ${COLOR_BORDER}│${NC}\n" $MEM_PERCENT
     
     # 硬盘进度条
-    DISK_BAR_WIDTH=30
+    DISK_BAR_WIDTH=25
     DISK_FILL=$((DISK_PERCENT * DISK_BAR_WIDTH / 100))
     DISK_EMPTY=$((DISK_BAR_WIDTH - DISK_FILL))
     
     if [ $DISK_PERCENT -gt 80 ]; then
-        DISK_COLOR=$RED
+        DISK_COLOR=$COLOR_DANGER
     elif [ $DISK_PERCENT -gt 50 ]; then
-        DISK_COLOR=$YELLOW
+        DISK_COLOR=$COLOR_WARNING
     else
-        DISK_COLOR=$GREEN
+        DISK_COLOR=$COLOR_SUCCESS
     fi
     
-    printf "${YELLOW}│${NC} ${GREEN}➤${NC} 硬盘: ${WHITE}%4s GB / %4s GB${NC} [${DISK_COLOR}" "$DISK_USED" "$DISK_TOTAL"
+    printf "${COLOR_BORDER}│${NC} ${COLOR_DIM}  ├─ 硬盘${NC} ${COLOR_TEXT}%4s GB / %4s GB${NC} [${DISK_COLOR}" "$DISK_USED" "$DISK_TOTAL"
     printf "%0.s█" $(seq 1 $DISK_FILL)
     printf "${NC}%0.s░" $(seq 1 $DISK_EMPTY)
-    printf "${WHITE}] %3d%%${NC} ${YELLOW}│${NC}\n" $DISK_PERCENT
+    printf "${NC}] ${DISK_COLOR}%3d%%${NC} ${COLOR_BORDER}│${NC}\n" $DISK_PERCENT
     
     # 网络流量
-    printf "${YELLOW}│${NC} ${GREEN}➤${NC} 网卡: ${WHITE}%-10s${NC} 接收: ${WHITE}%-10s${NC} 发送: ${WHITE}%-10s${NC} ${YELLOW}│${NC}\n" "$MAIN_IF" "$RX_READABLE" "$TX_READABLE"
+    printf "${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}●${NC} ${COLOR_INFO}网卡${NC} ${COLOR_TEXT}%-10s${NC} ${COLOR_DIM}接收${NC} ${COLOR_TEXT}%-10s${NC} ${COLOR_DIM}发送${NC} ${COLOR_TEXT}%-10s${NC} ${COLOR_BORDER}│${NC}\n" "$MAIN_IF" "$RX_READABLE" "$TX_READABLE"
     
     # 运行时间和进程
-    printf "${YELLOW}│${NC} ${GREEN}➤${NC} 运行: ${WHITE}%-20s${NC} 进程: ${WHITE}%-6s${NC} ${YELLOW}│${NC}\n" "$UPTIME" "$PROCESSES"
+    printf "${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}●${NC} ${COLOR_INFO}运行${NC} ${COLOR_TEXT}%-20s${NC} ${COLOR_PRIMARY}●${NC} ${COLOR_INFO}进程${NC} ${COLOR_TEXT}%-6s${NC} ${COLOR_BORDER}│${NC}\n" "$UPTIME" "$PROCESSES"
     
-    echo -e "${YELLOW}└─────────────────────────────────────────────────────────────────┘${NC}"
+    echo -e "${COLOR_BORDER}└─────────────────────────────────────────────────────────────────┘${NC}"
     echo ""
+}
+
+# IP类型判断函数（只返回颜色+文字，不包含符号）
+get_ip_type() {
+    local ip="$1"
+    local response=$(curl -s "https://ipinfo.check.place/$ip?lang=en" 2>/dev/null)
+    
+    # 检查API是否可用
+    if [ $? -ne 0 ] || [ -z "$response" ]; then
+        echo -e "${COLOR_WARNING}任播${NC}"
+        return
+    fi
+    
+    # 提取必要字段
+    local countrycode=$(echo "$response" | jq -r '.Country.IsoCode' 2>/dev/null)
+    local regcountrycode=$(echo "$response" | jq -r '.Country.RegisteredCountry.IsoCode' 2>/dev/null)
+    local asn=$(echo "$response" | jq -r '.ASN.AutonomousSystemNumber' 2>/dev/null)
+    
+    # 处理空值
+    [ "$countrycode" == "null" ] && countrycode=""
+    [ "$regcountrycode" == "null" ] && regcountrycode=""
+    [ "$asn" == "null" ] && asn=""
+    
+    # 判断IP类型
+    if [ -n "$countrycode" ] && [ -n "$regcountrycode" ]; then
+        if [ "$countrycode" == "$regcountrycode" ]; then
+            echo -e "${COLOR_SUCCESS}原生${NC}"
+        else
+            echo -e "${COLOR_DANGER}广播${NC}"
+        fi
+    else
+        echo -e "${COLOR_WARNING}任播${NC}"
+    fi
 }
 
 # 检查是否以root身份运行 🚨

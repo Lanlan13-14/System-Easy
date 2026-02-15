@@ -1,19 +1,17 @@
 #!/bin/bash
 
+# 颜色定义（标准ANSI颜色，白色背景友好）
+RED='\033[0;31m'          # 红色 - 广播IP/错误
+GREEN='\033[0;32m'        # 绿色 - 原生IP/成功
+YELLOW='\033[1;33m'       # 亮黄色 - 任播IP/边框
+BLUE='\033[0;34m'         # 蓝色 - 标题/分隔线
+PURPLE='\033[0;35m'       # 紫色 - 信息标签
+CYAN='\033[0;36m'         # 青色 - 辅助信息
+WHITE='\033[1;37m'        # 亮白色 - 主要文字
+NC='\033[0m'              # 重置颜色
+
 # 系统信息显示函数 📊
 show_system_info() {
-    # 定义颜色（全新配色）
-    # 主色调：使用更柔和的颜色
-    COLOR_PRIMARY='\033[38;5;39m'      # 亮蓝色 - 主边框
-    COLOR_SUCCESS='\033[38;5;48m'      # 薄荷绿 - 原生IP/正常状态
-    COLOR_WARNING='\033[38;5;214m'     # 橙色 - 任播IP/警告
-    COLOR_DANGER='\033[38;5;196m'       # 亮红色 - 广播IP/危险
-    COLOR_INFO='\033[38;5;99m'          # 紫色 - 信息标签
-    COLOR_TEXT='\033[38;5;255m'         # 亮白色 - 主要文字
-    COLOR_DIM='\033[38;5;244m'           # 灰色 - 辅助文字
-    COLOR_BORDER='\033[38;5;240m'        # 深灰色 - 边框
-    NC='\033[0m'                         # 重置颜色
-    
     clear
     
     # --- 静态信息（只在脚本启动时获取）---
@@ -29,21 +27,17 @@ show_system_info() {
     fi
     
     # --- 动态信息（每次刷新都更新）---
-    # CPU频率
     CPU_FREQ=$(lscpu | grep "CPU MHz" | awk '{print $3}' | head -n1)
     [ -z "$CPU_FREQ" ] && CPU_FREQ=$(lscpu | grep "CPU max MHz" | awk '{print $4}' | head -n1)
     
-    # 内存信息
     MEM_TOTAL=$(free -m | awk '/^Mem:/{print $2}')
     MEM_USED=$(free -m | awk '/^Mem:/{print $3}')
     MEM_PERCENT=$((MEM_USED * 100 / MEM_TOTAL))
     
-    # 硬盘信息
     DISK_TOTAL=$(df -BG / | awk 'NR==2 {print $2}' | sed 's/G//')
     DISK_USED=$(df -BG / | awk 'NR==2 {print $3}' | sed 's/G//')
     DISK_PERCENT=$(df / | awk 'NR==2 {print $5}' | sed 's/%//')
     
-    # 网卡流量
     MAIN_IF=$(ip route | grep default | awk '{print $5}' | head -n1)
     if [ -n "$MAIN_IF" ] && [ -f "/sys/class/net/$MAIN_IF/statistics/rx_bytes" ]; then
         RX_BYTES=$(cat /sys/class/net/$MAIN_IF/statistics/rx_bytes)
@@ -55,176 +49,136 @@ show_system_info() {
         TX_READABLE="N/A"
     fi
     
-    # 负载信息
     LOAD_1=$(uptime | awk -F'load average:' '{print $2}' | awk -F, '{print $1}' | xargs)
     LOAD_5=$(uptime | awk -F'load average:' '{print $2}' | awk -F, '{print $2}' | xargs)
     LOAD_15=$(uptime | awk -F'load average:' '{print $2}' | awk -F, '{print $3}' | xargs)
-    
-    # 计算负载百分比
     LOAD_1_PERCENT=$(awk "BEGIN {printf \"%.0f\", ($LOAD_1 / $CPU_CORES) * 100}")
     [ $LOAD_1_PERCENT -gt 100 ] && LOAD_1_PERCENT=100
     
-    # 进程数
     PROCESSES=$(ps aux | wc -l)
-    
-    # 运行时间
     UPTIME=$(uptime -p | sed 's/up //')
     
-    # 获取终端宽度
-    TERM_WIDTH=$(tput cols 2>/dev/null || echo 80)
-    # 设置内容最大宽度（不超过终端宽度）
-    MAX_WIDTH=$((TERM_WIDTH < 80 ? TERM_WIDTH : 80))
-    
-    # --- IP地址及类型判断（使用API）---
+    # --- 获取公网IP并判断类型 ---
     # IPv4
-    IPV4=$(ip -4 addr show | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | grep -v '^127\.' | head -n1)
-    if [ -n "$IPV4" ]; then
-        IPV4_TYPE=$(get_ip_type "$IPV4")
-        IPV4_DISPLAY="$IPV4"
-        IPV4_TYPE_DISPLAY="$IPV4_TYPE"
+    IPV4_PUBLIC=$(curl -4 -s --connect-timeout 3 https://ip.sb 2>/dev/null)
+    if [ -n "$IPV4_PUBLIC" ] && [[ "$IPV4_PUBLIC" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        IPV4_DISPLAY="$IPV4_PUBLIC"
+        IPV4_TYPE=$(get_ip_type "$IPV4_PUBLIC")
     else
-        IPV4_DISPLAY="未分配"
-        IPV4_TYPE_DISPLAY=""
+        IPV4_LOCAL=$(ip -4 addr show | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | grep -v '^127\.' | head -n1)
+        IPV4_DISPLAY="${IPV4_LOCAL:-未分配} (本地)"
+        IPV4_TYPE=""
     fi
     
     # IPv6
-    IPV6=$(ip -6 addr show | grep -oP '(?<=inet6\s)[0-9a-f:]+' | grep -v '^::1' | grep -v '^fe80' | head -n1)
-    if [ -n "$IPV6" ]; then
-        IPV6_TYPE=$(get_ip_type "$IPV6")
-        IPV6_DISPLAY="$IPV6"
-        IPV6_TYPE_DISPLAY="$IPV6_TYPE"
+    IPV6_PUBLIC=$(curl -6 -s --connect-timeout 3 https://ip.sb 2>/dev/null)
+    if [ -n "$IPV6_PUBLIC" ] && [[ "$IPV6_PUBLIC" =~ ^[0-9a-f:]+$ ]]; then
+        IPV6_DISPLAY="$IPV6_PUBLIC"
+        IPV6_TYPE=$(get_ip_type "$IPV6_PUBLIC")
     else
-        IPV6_DISPLAY="未分配"
-        IPV6_TYPE_DISPLAY=""
+        IPV6_LOCAL=$(ip -6 addr show | grep -oP '(?<=inet6\s)[0-9a-f:]+' | grep -v '^::1' | grep -v '^fe80' | head -n1)
+        IPV6_DISPLAY="${IPV6_LOCAL:-未分配} (本地)"
+        IPV6_TYPE=""
     fi
     
-    # --- 显示系统信息（简洁的线条边框）---
-    echo -e "${COLOR_BORDER}┌─────────────────────────────────────────────────────────────────┐${NC}"
+    # --- 显示系统信息（与主菜单风格统一）---
+    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     
     # 主机和用户
-    printf "${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}●${NC} ${COLOR_INFO}主机${NC} ${COLOR_TEXT}%-20s${NC} ${COLOR_PRIMARY}●${NC} ${COLOR_INFO}用户${NC} ${COLOR_TEXT}%-15s${NC} ${COLOR_BORDER}│${NC}\n" "$HOSTNAME" "$USER"
+    echo -e "${YELLOW}➤${NC} ${PURPLE}主机${NC} ${WHITE}$HOSTNAME${NC}  ${YELLOW}➤${NC} ${PURPLE}用户${NC} ${WHITE}$USER${NC}"
     
-    # 系统信息
-    printf "${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}●${NC} ${COLOR_INFO}系统${NC} ${COLOR_TEXT}%-50s${NC} ${COLOR_BORDER}│${NC}\n" "${OS_INFO:0:50}"
+    # 系统
+    echo -e "${YELLOW}➤${NC} ${PURPLE}系统${NC} ${WHITE}${OS_INFO:0:60}${NC}"
     
     # 内核和架构
-    printf "${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}●${NC} ${COLOR_INFO}内核${NC} ${COLOR_TEXT}%-25s${NC} ${COLOR_PRIMARY}●${NC} ${COLOR_INFO}架构${NC} ${COLOR_TEXT}%-10s${NC} ${COLOR_BORDER}│${NC}\n" "$KERNEL" "$ARCH"
+    echo -e "${YELLOW}➤${NC} ${PURPLE}内核${NC} ${WHITE}$KERNEL${NC}  ${YELLOW}➤${NC} ${PURPLE}架构${NC} ${WHITE}$ARCH${NC}"
     
-    # IPv4地址
-    printf "${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}●${NC} ${COLOR_INFO}IPv4${NC} ${COLOR_TEXT}%s${NC} " "$IPV4_DISPLAY"
-    if [ -n "$IPV4_TYPE_DISPLAY" ]; then
-        echo -e "$IPV4_TYPE_DISPLAY"
-    else
-        echo -e "${COLOR_BORDER}│${NC}"
-    fi
+    # IPv4
+    echo -e "${YELLOW}➤${NC} ${PURPLE}IPv4${NC} ${WHITE}$IPV4_DISPLAY${NC} $IPV4_TYPE"
     
-    # IPv6地址
-    printf "${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}●${NC} ${COLOR_INFO}IPv6${NC} ${COLOR_TEXT}%s${NC} " "$IPV6_DISPLAY"
-    if [ -n "$IPV6_TYPE_DISPLAY" ]; then
-        echo -e "$IPV6_TYPE_DISPLAY"
-    else
-        echo -e "${COLOR_BORDER}│${NC}"
-    fi
+    # IPv6
+    echo -e "${YELLOW}➤${NC} ${PURPLE}IPv6${NC} ${WHITE}$IPV6_DISPLAY${NC} $IPV6_TYPE"
     
-    # CPU信息
-    printf "${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}●${NC} ${COLOR_INFO}CPU${NC}  ${COLOR_TEXT}%-45s${NC} ${COLOR_BORDER}│${NC}\n" "${CPU_MODEL:0:45}"
-    printf "${COLOR_BORDER}│${NC} ${COLOR_DIM}  ├─ 核心${NC} ${COLOR_TEXT}%-4s${NC} ${COLOR_DIM}频率${NC} ${COLOR_TEXT}%-8s MHz${NC} ${COLOR_BORDER}│${NC}\n" "$CPU_CORES" "$CPU_FREQ"
+    # CPU
+    echo -e "${YELLOW}➤${NC} ${PURPLE}CPU${NC} ${WHITE}${CPU_MODEL:0:50}${NC}"
+    echo -e "  ${CYAN}├─ 核心${NC} ${WHITE}$CPU_CORES${NC} ${CYAN}频率${NC} ${WHITE}$CPU_FREQ MHz${NC}"
     
-    # CPU负载进度条
-    LOAD_BAR_WIDTH=25
+    # 负载进度条
+    LOAD_BAR_WIDTH=30
     LOAD_FILL=$((LOAD_1_PERCENT * LOAD_BAR_WIDTH / 100))
     LOAD_EMPTY=$((LOAD_BAR_WIDTH - LOAD_FILL))
-    
     if [ $LOAD_1_PERCENT -gt 80 ]; then
-        LOAD_COLOR=$COLOR_DANGER
+        LOAD_COLOR=$RED
     elif [ $LOAD_1_PERCENT -gt 50 ]; then
-        LOAD_COLOR=$COLOR_WARNING
+        LOAD_COLOR=$YELLOW
     else
-        LOAD_COLOR=$COLOR_SUCCESS
+        LOAD_COLOR=$GREEN
     fi
-    
-    printf "${COLOR_BORDER}│${NC} ${COLOR_DIM}  ├─ 负载${NC} ${COLOR_TEXT}1min: %.2f 5min: %.2f 15min: %.2f${NC}\n" "$LOAD_1" "$LOAD_5" "$LOAD_15"
-    printf "${COLOR_BORDER}│${NC} ${COLOR_DIM}  │  ${NC} [${LOAD_COLOR}" 
-    printf "%0.s█" $(seq 1 $LOAD_FILL)
-    printf "${NC}%0.s░" $(seq 1 $LOAD_EMPTY)
-    printf "${NC}] ${LOAD_COLOR}%3d%%${NC} ${COLOR_BORDER}│${NC}\n" $LOAD_1_PERCENT
+    echo -e "  ${CYAN}├─ 负载${NC} ${WHITE}1min: $LOAD_1 5min: $LOAD_5 15min: $LOAD_15${NC}"
+    printf "  ${CYAN}│  ${NC} [${LOAD_COLOR}%0.s█$(seq 1 $LOAD_FILL)${NC}%0.s░$(seq 1 $LOAD_EMPTY)${NC}] ${LOAD_COLOR}%3d%%${NC}\n" $LOAD_1_PERCENT
     
     # 内存进度条
-    MEM_BAR_WIDTH=25
+    MEM_BAR_WIDTH=30
     MEM_FILL=$((MEM_PERCENT * MEM_BAR_WIDTH / 100))
     MEM_EMPTY=$((MEM_BAR_WIDTH - MEM_FILL))
-    
     if [ $MEM_PERCENT -gt 80 ]; then
-        MEM_COLOR=$COLOR_DANGER
+        MEM_COLOR=$RED
     elif [ $MEM_PERCENT -gt 50 ]; then
-        MEM_COLOR=$COLOR_WARNING
+        MEM_COLOR=$YELLOW
     else
-        MEM_COLOR=$COLOR_SUCCESS
+        MEM_COLOR=$GREEN
     fi
-    
-    printf "${COLOR_BORDER}│${NC} ${COLOR_DIM}  ├─ 内存${NC} ${COLOR_TEXT}%4s MB / %4s MB${NC} [${MEM_COLOR}" "$MEM_USED" "$MEM_TOTAL"
-    printf "%0.s█" $(seq 1 $MEM_FILL)
-    printf "${NC}%0.s░" $(seq 1 $MEM_EMPTY)
-    printf "${NC}] ${MEM_COLOR}%3d%%${NC} ${COLOR_BORDER}│${NC}\n" $MEM_PERCENT
+    echo -e "  ${CYAN}├─ 内存${NC} ${WHITE}${MEM_USED}MB / ${MEM_TOTAL}MB${NC} [${MEM_COLOR}$(printf "%0.s█" $(seq 1 $MEM_FILL))${NC}$(printf "%0.s░" $(seq 1 $MEM_EMPTY))${NC}] ${MEM_COLOR}${MEM_PERCENT}%${NC}"
     
     # 硬盘进度条
-    DISK_BAR_WIDTH=25
+    DISK_BAR_WIDTH=30
     DISK_FILL=$((DISK_PERCENT * DISK_BAR_WIDTH / 100))
     DISK_EMPTY=$((DISK_BAR_WIDTH - DISK_FILL))
-    
     if [ $DISK_PERCENT -gt 80 ]; then
-        DISK_COLOR=$COLOR_DANGER
+        DISK_COLOR=$RED
     elif [ $DISK_PERCENT -gt 50 ]; then
-        DISK_COLOR=$COLOR_WARNING
+        DISK_COLOR=$YELLOW
     else
-        DISK_COLOR=$COLOR_SUCCESS
+        DISK_COLOR=$GREEN
     fi
-    
-    printf "${COLOR_BORDER}│${NC} ${COLOR_DIM}  ├─ 硬盘${NC} ${COLOR_TEXT}%4s GB / %4s GB${NC} [${DISK_COLOR}" "$DISK_USED" "$DISK_TOTAL"
-    printf "%0.s█" $(seq 1 $DISK_FILL)
-    printf "${NC}%0.s░" $(seq 1 $DISK_EMPTY)
-    printf "${NC}] ${DISK_COLOR}%3d%%${NC} ${COLOR_BORDER}│${NC}\n" $DISK_PERCENT
+    echo -e "  ${CYAN}├─ 硬盘${NC} ${WHITE}${DISK_USED}GB / ${DISK_TOTAL}GB${NC} [${DISK_COLOR}$(printf "%0.s█" $(seq 1 $DISK_FILL))${NC}$(printf "%0.s░" $(seq 1 $DISK_EMPTY))${NC}] ${DISK_COLOR}${DISK_PERCENT}%${NC}"
     
     # 网络流量
-    printf "${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}●${NC} ${COLOR_INFO}网卡${NC} ${COLOR_TEXT}%-10s${NC} ${COLOR_DIM}接收${NC} ${COLOR_TEXT}%-10s${NC} ${COLOR_DIM}发送${NC} ${COLOR_TEXT}%-10s${NC} ${COLOR_BORDER}│${NC}\n" "$MAIN_IF" "$RX_READABLE" "$TX_READABLE"
+    echo -e "${YELLOW}➤${NC} ${PURPLE}网卡${NC} ${WHITE}$MAIN_IF${NC} ${CYAN}接收${NC} ${WHITE}$RX_READABLE${NC} ${CYAN}发送${NC} ${WHITE}$TX_READABLE${NC}"
     
     # 运行时间和进程
-    printf "${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}●${NC} ${COLOR_INFO}运行${NC} ${COLOR_TEXT}%-20s${NC} ${COLOR_PRIMARY}●${NC} ${COLOR_INFO}进程${NC} ${COLOR_TEXT}%-6s${NC} ${COLOR_BORDER}│${NC}\n" "$UPTIME" "$PROCESSES"
+    echo -e "${YELLOW}➤${NC} ${PURPLE}运行${NC} ${WHITE}$UPTIME${NC}  ${YELLOW}➤${NC} ${PURPLE}进程${NC} ${WHITE}$PROCESSES${NC}"
     
-    echo -e "${COLOR_BORDER}└─────────────────────────────────────────────────────────────────┘${NC}"
+    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo ""
 }
 
-# IP类型判断函数（只返回颜色+文字，不包含符号）
+# IP类型判断函数（使用ipinfo.io）
 get_ip_type() {
     local ip="$1"
-    local response=$(curl -s "https://ipinfo.check.place/$ip?lang=en" 2>/dev/null)
+    local response=$(curl -s --connect-timeout 3 "https://ipinfo.io/$ip/json" 2>/dev/null)
     
-    # 检查API是否可用
     if [ $? -ne 0 ] || [ -z "$response" ]; then
-        echo -e "${COLOR_WARNING}任播${NC}"
+        echo -e "${YELLOW}任播${NC}"  # 无法判断时默认任播
         return
     fi
     
-    # 提取必要字段
-    local countrycode=$(echo "$response" | jq -r '.Country.IsoCode' 2>/dev/null)
-    local regcountrycode=$(echo "$response" | jq -r '.Country.RegisteredCountry.IsoCode' 2>/dev/null)
-    local asn=$(echo "$response" | jq -r '.ASN.AutonomousSystemNumber' 2>/dev/null)
+    local country=$(echo "$response" | jq -r '.country' 2>/dev/null)
+    local asn_country=$(echo "$response" | jq -r '.asn.country' 2>/dev/null)
+    local asn=$(echo "$response" | jq -r '.asn.asn' 2>/dev/null | sed 's/AS//')
     
-    # 处理空值
-    [ "$countrycode" == "null" ] && countrycode=""
-    [ "$regcountrycode" == "null" ] && regcountrycode=""
+    [ "$country" == "null" ] && country=""
+    [ "$asn_country" == "null" ] && asn_country=""
     [ "$asn" == "null" ] && asn=""
     
-    # 判断IP类型
-    if [ -n "$countrycode" ] && [ -n "$regcountrycode" ]; then
-        if [ "$countrycode" == "$regcountrycode" ]; then
-            echo -e "${COLOR_SUCCESS}原生${NC}"
+    if [ -n "$country" ] && [ -n "$asn_country" ]; then
+        if [ "$country" == "$asn_country" ]; then
+            echo -e "${GREEN}原生${NC}"
         else
-            echo -e "${COLOR_DANGER}广播${NC}"
+            echo -e "${RED}广播${NC}"
         fi
     else
-        echo -e "${COLOR_WARNING}任播${NC}"
+        echo -e "${YELLOW}任播${NC}"
     fi
 }
 
@@ -236,6 +190,7 @@ fi
 
 # 脚本URL
 SCRIPT_URL="https://raw.githubusercontent.com/Lanlan13-14/System-Easy/refs/heads/main/system.sh"
+
 # 功能1：安装常用工具和依赖 🛠️
 install_tools() {
     echo "正在更新软件包列表 📦..."
@@ -1522,99 +1477,27 @@ tfo_menu() {
 while true; do
     # 每次显示菜单前先显示系统信息
     show_system_info
+    
+    # 菜单标题（与系统信息风格一致）
+    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${WHITE}                        功能菜单                              ${NC}"
+    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    
+    # 两列菜单（您原来的无框版本）
+    echo -e "${YELLOW}[1]${NC} 安装常用工具 🛠️       ${YELLOW}[11]${NC} DDNS 管理 🌐"
+    echo -e "${YELLOW}[2]${NC} 日志清理管理 🗑️       ${YELLOW}[12]${NC} 更新脚本 📥"
+    echo -e "${YELLOW}[3]${NC} BBR管理 ⚡            ${YELLOW}[13]${NC} 查看端口占用 🔍"
+    echo -e "${YELLOW}[4]${NC} DNS管理 🌐           ${YELLOW}[14]${NC} 内存占用最大 💾"
+    echo -e "${YELLOW}[5]${NC} 修改主机名 🖥️        ${YELLOW}[15]${NC} CPU占用最大 🖥️"
+    echo -e "${YELLOW}[6]${NC} SSH端口管理 🔒       ${YELLOW}[16]${NC} 系统定时重启 🔄"
+    echo -e "${YELLOW}[7]${NC} 修改SSH密码 🔑       ${YELLOW}[17]${NC} Cron任务管理 ⏰"
+    echo -e "${YELLOW}[8]${NC} SSH密钥登录管理 🔑   ${YELLOW}[18]${NC} SWAP管理 💾"
+    echo -e "${YELLOW}[9]${NC} 卸载脚本 🗑️          ${YELLOW}[19]${NC} TFO管理 🚀"
+    echo -e "${YELLOW}[10]${NC} 时区时间同步 ⏰      ${YELLOW}[20]${NC} 退出 🚪"
+    
+    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    read -p "请输入您的选择 [1-20]： " main_choice
 
-    # 获取终端宽度
-    TERM_WIDTH=$(tput cols 2>/dev/null || echo 80)
-
-    # 菜单标题
-    echo -e "${COLOR_BORDER}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${COLOR_PRIMARY}                        功 能 菜 单                              ${NC}"
-    echo -e "${COLOR_BORDER}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-
-    # ============================
-    #   宽屏（≥100）三列高密度布局
-    # ============================
-    if [ $TERM_WIDTH -ge 100 ]; then
-        echo -e "${COLOR_BORDER}┌───────────────┬───────────────┬───────────────┐${NC}"
-        echo -e "${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[1]${NC} 工具安装 🛠️   ${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[8]${NC} SSH密钥 🔑   ${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[15]${NC} CPU最大 🖥️ ${COLOR_BORDER}│${NC}"
-        echo -e "${COLOR_BORDER}├───────────────┼───────────────┼───────────────┤${NC}"
-        echo -e "${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[2]${NC} 日志清理 🗑️   ${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[9]${NC} 卸载脚本 🗑️  ${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[16]${NC} 定时重启 🔄 ${COLOR_BORDER}│${NC}"
-        echo -e "${COLOR_BORDER}├───────────────┼───────────────┼───────────────┤${NC}"
-        echo -e "${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[3]${NC} BBR管理 ⚡     ${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[10]${NC} 时区同步 ⏰  ${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[17]${NC} Cron任务 ⏰ ${COLOR_BORDER}│${NC}"
-        echo -e "${COLOR_BORDER}├───────────────┼───────────────┼───────────────┤${NC}"
-        echo -e "${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[4]${NC} DNS管理 🌐    ${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[11]${NC} DDNS管理 🌐  ${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[18]${NC} SWAP管理 💾 ${COLOR_BORDER}│${NC}"
-        echo -e "${COLOR_BORDER}├───────────────┼───────────────┼───────────────┤${NC}"
-        echo -e "${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[5]${NC} 主机名 🖥️     ${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[12]${NC} 更新脚本 📥  ${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[19]${NC} TFO 🚀      ${COLOR_BORDER}│${NC}"
-        echo -e "${COLOR_BORDER}├───────────────┼───────────────┼───────────────┤${NC}"
-        echo -e "${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[6]${NC} SSH端口 🔒    ${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[13]${NC} 端口占用 🔍  ${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[20]${NC} 退出 🚪     ${COLOR_BORDER}│${NC}"
-        echo -e "${COLOR_BORDER}├───────────────┼───────────────┼───────────────┤${NC}"
-        echo -e "${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[7]${NC} SSH密码 🔑    ${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[14]${NC} 内存最大 💾  ${COLOR_BORDER}│${NC}               ${COLOR_BORDER}│${NC}"
-        echo -e "${COLOR_BORDER}└───────────────┴───────────────┴───────────────┘${NC}"
-
-    # ============================
-    #   中屏（70–99）两列高密度布局
-    # ============================
-    elif [ $TERM_WIDTH -ge 70 ]; then
-        echo -e "${COLOR_BORDER}┌────────────────────┬────────────────────┐${NC}"
-        echo -e "${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[1]${NC} 工具安装 🛠️      ${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[11]${NC} DDNS管理 🌐     ${COLOR_BORDER}│${NC}"
-        echo -e "${COLOR_BORDER}├────────────────────┼────────────────────┤${NC}"
-        echo -e "${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[2]${NC} 日志清理 🗑️      ${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[12]${NC} 更新脚本 📥     ${COLOR_BORDER}│${NC}"
-        echo -e "${COLOR_BORDER}├────────────────────┼────────────────────┤${NC}"
-        echo -e "${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[3]${NC} BBR管理 ⚡        ${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[13]${NC} 端口占用 🔍     ${COLOR_BORDER}│${NC}"
-        echo -e "${COLOR_BORDER}├────────────────────┼────────────────────┤${NC}"
-        echo -e "${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[4]${NC} DNS管理 🌐       ${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[14]${NC} 内存最大 💾     ${COLOR_BORDER}│${NC}"
-        echo -e "${COLOR_BORDER}├────────────────────┼────────────────────┤${NC}"
-        echo -e "${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[5]${NC} 主机名 🖥️        ${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[15]${NC} CPU最大 🖥️     ${COLOR_BORDER}│${NC}"
-        echo -e "${COLOR_BORDER}├────────────────────┼────────────────────┤${NC}"
-        echo -e "${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[6]${NC} SSH端口 🔒       ${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[16]${NC} 定时重启 🔄     ${COLOR_BORDER}│${NC}"
-        echo -e "${COLOR_BORDER}├────────────────────┼────────────────────┤${NC}"
-        echo -e "${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[7]${NC} SSH密码 🔑       ${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[17]${NC} Cron任务 ⏰     ${COLOR_BORDER}│${NC}"
-        echo -e "${COLOR_BORDER}├────────────────────┼────────────────────┤${NC}"
-        echo -e "${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[8]${NC} SSH密钥 🔑       ${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[18]${NC} SWAP管理 💾     ${COLOR_BORDER}│${NC}"
-        echo -e "${COLOR_BORDER}├────────────────────┼────────────────────┤${NC}"
-        echo -e "${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[9]${NC} 卸载脚本 🗑️      ${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[19]${NC} TFO 🚀         ${COLOR_BORDER}│${NC}"
-        echo -e "${COLOR_BORDER}├────────────────────┼────────────────────┤${NC}"
-        echo -e "${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[10]${NC} 时区同步 ⏰      ${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[20]${NC} 退出 🚪         ${COLOR_BORDER}│${NC}"
-        echo -e "${COLOR_BORDER}└────────────────────┴────────────────────┘${NC}"
-
-    # ============================
-    #   窄屏（<70）单列极致紧凑布局
-    # ============================
-    else
-    echo -e "${COLOR_BORDER}┌────────────────────────┐${NC}"
-    for item in \
-        "1  工具安装 🛠️" \
-        "2  日志清理 🗑️" \
-        "3  BBR管理 ⚡" \
-        "4  DNS管理 🌐" \
-        "5  主机名 🖥️" \
-        "6  SSH端口 🔒" \
-        "7  SSH密码 🔑" \
-        "8  SSH密钥 🔑" \
-        "9  卸载脚本 🗑️" \
-        "10 时区同步 ⏰" \
-        "11 DDNS管理 🌐" \
-        "12 更新脚本 📥" \
-        "13 端口占用 🔍" \
-        "14 内存最大 💾" \
-        "15 CPU最大 🖥️" \
-        "16 定时重启 🔄" \
-        "17 Cron任务 ⏰" \
-        "18 SWAP管理 💾" \
-        "19 TFO 🚀" \
-        "20 退出 🚪"
-    do
-        printf "${COLOR_BORDER}│${NC} ${COLOR_PRIMARY}[${item%% *}]${NC} %-16s ${COLOR_BORDER}│${NC}\n" "${item#* }"
-        echo -e "${COLOR_BORDER}├────────────────────────┤${NC}"
-    done
-    echo -e "${COLOR_BORDER}└────────────────────────┘${NC}"
-fi
-
-    echo -e "${COLOR_BORDER}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${COLOR_INFO}请输入您的选择 [1-20]：${NC} "
-    read -p "" main_choice
-
-    # 这里保持原有的 case 语句不变
     case $main_choice in
         1) install_tools ;;
         2) log_cleanup_menu ;;
@@ -1636,11 +1519,11 @@ fi
         18) swap_menu ;;
         19) tfo_menu ;;
         20)
-            echo -e "${COLOR_SUCCESS}👋 已退出，下次使用直接运行: sudo system-easy${NC}"
+            echo -e "${GREEN}👋 已退出，下次使用直接运行: sudo system-easy${NC}"
             exit 0
             ;;
         *)
-            echo -e "${COLOR_DANGER}无效选择，请重试 😕${NC}"
+            echo -e "${RED}无效选择，请重试 😕${NC}"
             sleep 1
             ;;
     esac

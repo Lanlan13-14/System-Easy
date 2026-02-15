@@ -1527,33 +1527,25 @@ view_system_info() {
     old_settings=$(stty -g)
     # 设置终端为原始模式，以便读取单个字符
     stty raw -echo
-    clear
-    echo -e "${WHITE}系统信息监控模式 (每10秒刷新，按 q 返回主菜单)${NC}"
-    echo ""
-    
+
     while true; do
-        # 清屏并显示系统信息
         clear
+        echo -e "${WHITE}系统信息监控模式 (每10秒刷新，按 q 返回主菜单)${NC}\n"
         show_system_info
-        
-        # 显示退出提示
-        echo -e "${YELLOW}按 q 键返回主菜单...${NC}"
-        
+        echo -e "\n${YELLOW}按 q 键返回主菜单...${NC}"
+
         # 等待用户输入，超时10秒
         read -t 10 -n 1 key
         if [ $? -eq 0 ]; then
-            # 有按键
             if [ "$key" = "q" ] || [ "$key" = "Q" ]; then
                 break
             fi
         fi
-        # 超时或无相关按键，继续循环
     done
-    
+
     # 恢复终端设置
     stty "$old_settings"
     clear
-    # 返回主菜单（主循环会重新显示）
 }
 
 # 主菜单（无框无横线版）

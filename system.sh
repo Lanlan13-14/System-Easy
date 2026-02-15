@@ -1462,7 +1462,7 @@ while true; do
     show_system_info
     
     # 菜单标题（仅文字）
-    echo -e "${WHITE}功能菜单${NC}"
+    echo -e "${WHITE}System-Easy功能菜单${NC}"
     
     # 两列菜单（无框，只有颜色标记）
     echo -e "${YELLOW}[1]${NC} 安装常用工具 🛠️       ${YELLOW}[11]${NC} DDNS 管理 🌐"

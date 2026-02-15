@@ -1527,25 +1527,43 @@ view_system_info() {
     trap 'stty "$old_settings"; tput cnorm; clear; exit' INT TERM
 
     stty raw -echo
-    tput civis
+    tput civis  # 隐藏光标
 
     while true; do
         tput clear
         tput cup 0 0
+
+        # 获取终端尺寸
+        cols=$(tput cols)
+        lines=$(tput lines)
+
+        # 左右列宽按比例缩放（左列30%，右列70%）
+        left_width=$((cols*30/100))
+        right_width=$((cols-left_width-3))  # 3 = " : "
+
         echo -e "${WHITE}系统信息监控模式 (每10秒刷新，按 q 返回主菜单)${NC}\n"
 
-        # 调用 show_system_info 并确保固定输出 20 行
-        show_system_info | head -n 20 | while read -r line; do
-            printf "%-80s\n" "$line"  # 固定宽度 80，空白补齐
+        # 捕获 show_system_info 的输出
+        info_lines=()
+        while IFS= read -r line; do
+            # 截断超出右列宽度部分（避免移动端换行）
+            info_lines+=("${line:0:cols}")
+        done < <(show_system_info)
+
+        # 输出到屏幕，并保证固定行数（填充到 lines-3，留3行给标题和提示）
+        max_output_lines=$((lines-3))
+        for ((i=0;i<max_output_lines;i++)); do
+            if [ $i -lt ${#info_lines[@]} ]; then
+                printf "%s\n" "${info_lines[$i]}"
+            else
+                printf "\n"
+            fi
         done
 
-        # 填充剩余行到 20 行
-        for i in $(seq $(($(tput lines)-21))); do
-            echo ""
-        done
-
+        # 底部提示
         echo -e "${YELLOW}按 q 键返回主菜单...${NC}"
 
+        # 等待用户输入，10秒刷新一次
         if read -t 10 -n 1 key; then
             [[ "$key" =~ [qQ] ]] && break
         fi

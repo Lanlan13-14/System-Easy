@@ -609,114 +609,714 @@ change_hostname() {
     echo "当前hosts文件配置："
     grep "$(hostname)" /etc/hosts 2>/dev/null || echo "未在hosts文件中找到当前主机名"
 }
-# 功能6：SSH端口管理子菜单 🔒
+# 功能6：SSH端口管理子菜单（Debian 12+ systemd优化版） 🔒
 ssh_port_menu() {
-    current_port=$(grep "^Port" /etc/ssh/sshd_config | awk '{print $2}' | head -n 1 || echo "22")
-    echo "当前SSH端口：$current_port 🔍"
+    # 检测是否为LXC容器
+    local is_lxc=false
+    if grep -q "container=lxc" /proc/1/environ 2>/dev/null || [ -f /.lxc-boot-id ]; then
+        is_lxc=true
+        echo "检测到LXC容器环境，使用兼容模式 🐧"
+    fi
+    
+    # 检测systemd版本和SSH socket激活状态
+    local has_socket=false
+    local ssh_service="ssh"
+    local socket_active=false
+    
+    # 检查系统使用的SSH服务名称
+    if systemctl list-units --full -all 2>/dev/null | grep -q "ssh.service"; then
+        ssh_service="ssh"
+    elif systemctl list-units --full -all 2>/dev/null | grep -q "sshd.service"; then
+        ssh_service="sshd"
+    fi
+    
+    # 检查是否存在ssh.socket且是否激活
+    if systemctl list-unit-files 2>/dev/null | grep -q "ssh.socket"; then
+        has_socket=true
+        if systemctl is-active ssh.socket >/dev/null 2>&1; then
+            socket_active=true
+        fi
+    fi
+    
+    # 获取当前SSH端口（需要考虑socket和服务两种情况）
+    local current_port=""
+    local current_port_source=""
+    
+    # 首先从sshd_config获取配置的端口
+    local config_port=$(grep -E "^\s*Port\s+" /etc/ssh/sshd_config 2>/dev/null | awk '{print $2}' | head -n 1)
+    
+    # 检查实际监听的端口
+    if command -v ss >/dev/null 2>&1; then
+        local listening_ports=$(ss -tlnp 2>/dev/null | grep -E ":(22|${config_port:-22})" | grep -E "(sshd|ssh)")
+        if [ ! -z "$listening_ports" ]; then
+            # 提取实际监听的端口
+            current_port=$(echo "$listening_ports" | head -n1 | sed -n 's/.*:\([0-9]\+\).*/\1/p')
+            current_port_source="service"
+        fi
+    fi
+    
+    # 如果没有找到监听端口但有socket激活，检查socket端口
+    if [ -z "$current_port" ] && [ "$has_socket" = true ]; then
+        # 从socket文件获取端口
+        if [ -f /lib/systemd/system/ssh.socket ]; then
+            local socket_port=$(grep -E "ListenStream=" /lib/systemd/system/ssh.socket 2>/dev/null | cut -d= -f2)
+            current_port=${socket_port:-22}
+            current_port_source="socket"
+        fi
+    fi
+    
+    # 如果都没找到，使用配置端口或默认22
+    current_port=${current_port:-${config_port:-22}}
+    
+    echo "═══════════════════════════════════════════"
+    echo "           SSH端口管理工具"
+    echo "═══════════════════════════════════════════"
+    echo "📊 当前状态："
+    echo "   • 配置端口: ${config_port:-22}"
+    echo "   • 实际监听: ${current_port} (${current_port_source:-service})"
+    if [ "$has_socket" = true ]; then
+        echo "   • Socket激活: $([ "$socket_active" = true ] && echo "✅ 启用" || echo "❌ 停用")"
+        if [ "$socket_active" = true ]; then
+            local socket_port=$(grep -E "ListenStream=" /lib/systemd/system/ssh.socket 2>/dev/null | cut -d= -f2)
+            echo "   • Socket端口: ${socket_port:-22}"
+        fi
+    fi
+    echo "═══════════════════════════════════════════"
+    
     while true; do
-        echo "SSH端口管理菜单 🔒："
-        echo "1. 修改SSH端口（原端口将立即失效） ✏️"
-        echo "2. 返回主菜单 🔙"
-        read -p "请输入您的选择： " choice
+        echo ""
+        echo "🔧 SSH端口管理菜单："
+        echo "  1. 修改SSH端口 ✏️"
+        echo "  2. 查看SSH服务状态 📊"
+        echo "  3. 测试SSH配置 ✅"
+        echo "  4. 切换监听模式 (socket/daemon) 🔄"
+        echo "  5. 返回主菜单 🔙"
+        read -p "请输入您的选择 [1-5]: " choice
+        
         case $choice in
             1)
-                read -p "请输入新的SSH端口号（1-65535）： " new_port
+                echo ""
+                echo "⚠️  警告：修改端口前请确保："
+                echo "  1. 防火墙已放行新端口"
+                echo "  2. 您有其他方式访问服务器（如VNC或物理控制台）"
+                echo "  3. 已备份重要数据"
+                echo ""
+                
+                read -p "请输入新的SSH端口号 (1-65535): " new_port
+                
                 # 验证端口有效性
                 if ! [[ "$new_port" =~ ^[0-9]+$ ]] || [ "$new_port" -lt 1 ] || [ "$new_port" -gt 65535 ]; then
-                    echo "无效端口号，请输入1-65535之间的数字 😕"
+                    echo "❌ 无效端口号，请输入1-65535之间的数字"
                     continue
                 fi
+                
                 # 检查端口是否被占用
-                if command -v ss >/dev/null && ss -tuln | grep -q ":$new_port "; then
-                    echo "端口 $new_port 已被占用，请选择其他端口 😔"
-                    continue
-                elif command -v netstat >/dev/null && netstat -tuln | grep -q ":$new_port "; then
-                    echo "端口 $new_port 已被占用，请选择其他端口 😔"
-                    continue
-                fi
-                # 备份SSH配置文件
-                cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak
-                # 修改SSH配置文件，替换所有Port配置
-                sed -i "/^#*Port /d" /etc/ssh/sshd_config
-                echo "Port $new_port" >> /etc/ssh/sshd_config
-                # 检查UFW并添加规则
-                if command -v ufw >/dev/null && ufw status | grep -q "Status: active"; then
-                    echo "检测到UFW防火墙已启用，正在为新端口 $new_port 添加放行规则 🛡️..."
-                    if ufw allow "$new_port"/tcp && ufw reload; then
-                        echo "UFW规则已更新，新端口 $new_port 已放行 🎉"
-                    else
-                        echo "UFW规则添加失败，正在回滚SSH配置 😔"
-                        mv /etc/ssh/sshd_config.bak /etc/ssh/sshd_config
-                        continue
+                echo "检查端口 $new_port 占用情况..."
+                local port_busy=false
+                
+                if command -v ss >/dev/null 2>&1; then
+                    if ss -tuln 2>/dev/null | grep -q ":$new_port "; then
+                        port_busy=true
+                    fi
+                elif command -v netstat >/dev/null 2>&1; then
+                    if netstat -tuln 2>/dev/null | grep -q ":$new_port "; then
+                        port_busy=true
+                    fi
+                elif [ -f /proc/net/tcp ]; then
+                    local hex_port=$(printf "%04X" $new_port)
+                    if grep -qi ":${hex_port}" /proc/net/tcp 2>/dev/null; then
+                        port_busy=true
                     fi
                 fi
-                # 测试SSH配置
-                if sshd -t >/dev/null 2>&1; then
-                    # 重启SSH服务
-                    if systemctl restart ssh >/dev/null 2>&1; then
-                        echo "原端口已失效，SSH端口已修改为 $new_port，请用新端口登录，如无法登录，请检查防火墙是否放行 $new_port 端口 ❗"
-                        current_port="$new_port"
+                
+                if [ "$port_busy" = true ]; then
+                    echo "❌ 端口 $new_port 已被占用，请选择其他端口"
+                    continue
+                fi
+                
+                # 确认操作
+                echo ""
+                echo "将修改SSH端口从 $current_port 改为 $new_port"
+                read -p "是否继续？(y/n): " confirm
+                if [ "$confirm" != "y" ] && [ "$confirm" != "Y" ]; then
+                    echo "操作已取消"
+                    continue
+                fi
+                
+                # 备份配置文件
+                local backup_dir="/root/ssh_backups"
+                mkdir -p "$backup_dir"
+                local timestamp=$(date +%Y%m%d_%H%M%S)
+                local backup_file="$backup_dir/sshd_config_${timestamp}.bak"
+                
+                cp /etc/ssh/sshd_config "$backup_file"
+                echo "✅ 配置文件已备份到: $backup_file"
+                
+                # 修改SSH配置文件
+                echo "修改SSH配置..."
+                if grep -q -E "^\s*Port\s+" /etc/ssh/sshd_config; then
+                    sed -i "s/^\s*Port\s\+.*/Port $new_port/" /etc/ssh/sshd_config
+                else
+                    echo "Port $new_port" >> /etc/ssh/sshd_config
+                fi
+                
+                # 如果socket激活启用，也需要修改socket配置
+                if [ "$has_socket" = true ] && [ -f /lib/systemd/system/ssh.socket ]; then
+                    echo "检测到ssh.socket，同步修改socket配置..."
+                    cp /lib/systemd/system/ssh.socket "$backup_dir/ssh.socket_${timestamp}.bak"
+                    
+                    if grep -q "ListenStream=" /lib/systemd/system/ssh.socket; then
+                        sed -i "s/ListenStream=.*/ListenStream=$new_port/" /lib/systemd/system/ssh.socket
                     else
-                        echo "SSH服务重启失败 😔 请检查："
-                        echo " systemctl status ssh.service"
-                        echo " journalctl -xeu ssh.service"
-                        mv /etc/ssh/sshd_config.bak /etc/ssh/sshd_config
-                        continue
+                        echo "ListenStream=$new_port" >> /lib/systemd/system/ssh.socket
+                    fi
+                    
+                    # 重新加载systemd配置
+                    systemctl daemon-reload
+                fi
+                
+                # 配置防火墙
+                if [ "$is_lxc" = false ]; then
+                    configure_firewall "$new_port" "$current_port"
+                else
+                    echo "LXC环境：请确保宿主机防火墙放行端口 $new_port"
+                fi
+                
+                # 测试SSH配置
+                echo "测试SSH配置..."
+                if ! sshd -t >/dev/null 2>&1; then
+                    echo "❌ SSH配置测试失败"
+                    echo "正在恢复配置..."
+                    cp "$backup_file" /etc/ssh/sshd_config
+                    
+                    if [ "$has_socket" = true ] && [ -f "$backup_dir/ssh.socket_${timestamp}.bak" ]; then
+                        cp "$backup_dir/ssh.socket_${timestamp}.bak" /lib/systemd/system/ssh.socket
+                        systemctl daemon-reload
+                    fi
+                    
+                    echo "❌ 配置已恢复，请检查SSH配置错误："
+                    sshd -t
+                    continue
+                fi
+                
+                echo "✅ SSH配置测试通过"
+                
+                # 根据当前模式重启SSH
+                if [ "$socket_active" = true ]; then
+                    # Socket激活模式
+                    echo "当前使用socket激活模式，重启ssh.socket..."
+                    systemctl stop ssh.socket
+                    systemctl stop ssh.service
+                    systemctl start ssh.socket
+                else
+                    # 传统daemon模式
+                    echo "当前使用传统daemon模式，重启ssh.service..."
+                    systemctl restart "$ssh_service"
+                fi
+                
+                # 等待服务启动
+                sleep 3
+                
+                # 验证新端口是否监听
+                echo "验证新端口监听状态..."
+                local verify_success=false
+                
+                if command -v ss >/dev/null 2>&1; then
+                    if ss -tlnp 2>/dev/null | grep -q ":$new_port"; then
+                        verify_success=true
+                    fi
+                elif command -v netstat >/dev/null 2>&1; then
+                    if netstat -tlnp 2>/dev/null | grep -q ":$new_port"; then
+                        verify_success=true
+                    fi
+                fi
+                
+                if [ "$verify_success" = true ]; then
+                    echo "✅ SSH端口已成功修改为 $new_port"
+                    echo ""
+                    echo "📝 请使用以下命令测试连接："
+                    echo "   ssh -p $new_port root@your_server_ip"
+                    echo ""
+                    echo "⚠️  重要提示："
+                    echo "   1. 请在当前会话保持连接，另开终端测试新端口"
+                    echo "   2. 测试成功后再关闭当前会话"
+                    echo "   3. 如果无法连接，可使用备份配置恢复："
+                    echo "      cp $backup_file /etc/ssh/sshd_config"
+                    
+                    if [ "$socket_active" = true ]; then
+                        echo "      systemctl restart ssh.socket"
+                    else
+                        echo "      systemctl restart $ssh_service"
+                    fi
+                    
+                    current_port="$new_port"
+                else
+                    echo "❌ 警告：未检测到新端口 $new_port 监听"
+                    echo "请手动检查服务状态："
+                    echo "   systemctl status ssh.socket"
+                    echo "   systemctl status $ssh_service"
+                    echo "   journalctl -xe"
+                fi
+                ;;
+                
+            2)
+                echo ""
+                echo "📊 SSH服务详细状态："
+                echo "──────────────────"
+                
+                # SSH服务状态
+                echo "🔹 SSH服务状态："
+                if systemctl list-units --full -all 2>/dev/null | grep -q "ssh.service"; then
+                    systemctl status ssh.service --no-pager -l | head -n 20
+                elif systemctl list-units --full -all 2>/dev/null | grep -q "sshd.service"; then
+                    systemctl status sshd.service --no-pager -l | head -n 20
+                else
+                    echo "   SSH服务未找到"
+                fi
+                
+                echo ""
+                echo "🔹 Socket状态："
+                if [ "$has_socket" = true ]; then
+                    systemctl status ssh.socket --no-pager -l | head -n 10
+                else
+                    echo "   未使用ssh.socket"
+                fi
+                
+                echo ""
+                echo "🔹 监听端口："
+                if command -v ss >/dev/null 2>&1; then
+                    ss -tlnp | grep -E ":(22|$current_port)" | head -n 5 || echo "   未找到监听端口"
+                elif command -v netstat >/dev/null 2>&1; then
+                    netstat -tlnp | grep -E ":(22|$current_port)" | head -n 5 || echo "   未找到监听端口"
+                else
+                    echo "   无法查看端口监听状态"
+                fi
+                
+                echo ""
+                echo "🔹 配置文件："
+                echo "   /etc/ssh/sshd_config:"
+                grep -E "^\s*(Port|ListenAddress)" /etc/ssh/sshd_config 2>/dev/null || echo "   未配置自定义端口"
+                
+                if [ "$has_socket" = true ] && [ -f /lib/systemd/system/ssh.socket ]; then
+                    echo ""
+                    echo "   /lib/systemd/system/ssh.socket:"
+                    grep -E "ListenStream=" /lib/systemd/system/ssh.socket 2>/dev/null
+                fi
+                ;;
+                
+            3)
+                echo ""
+                echo "🔍 SSH配置测试："
+                echo "──────────────────"
+                
+                # 测试配置文件
+                echo -n "配置文件语法检查: "
+                if sshd -t >/dev/null 2>&1; then
+                    echo "✅ 通过"
+                else
+                    echo "❌ 失败"
+                    sshd -t
+                fi
+                
+                # 测试端口连通性
+                echo -n "本地端口连通性测试: "
+                if command -v nc >/dev/null 2>&1; then
+                    if timeout 2 nc -zv localhost "$current_port" 2>&1 | grep -q "succeeded"; then
+                        echo "✅ 端口 $current_port 可连接"
+                    else
+                        echo "❌ 端口 $current_port 无法连接"
+                    fi
+                elif command -v telnet >/dev/null 2>&1; then
+                    if timeout 2 telnet localhost "$current_port" 2>&1 | grep -q "Connected"; then
+                        echo "✅ 端口 $current_port 可连接"
+                    else
+                        echo "❌ 端口 $current_port 无法连接"
                     fi
                 else
-                    echo "SSH配置文件测试失败 😔 请检查："
-                    echo " sshd -t"
-                    mv /etc/ssh/sshd_config.bak /etc/ssh/sshd_config
-                    continue
+                    echo "⚠️  无法测试（需要nc或telnet）"
+                fi
+                
+                # 检查防火墙
+                echo ""
+                echo "防火墙状态："
+                if command -v ufw >/dev/null 2>&1; then
+                    ufw status | grep -E "($current_port|22)" || echo "   未找到相关规则"
+                elif command -v firewall-cmd >/dev/null 2>&1; then
+                    firewall-cmd --list-ports | grep -E "($current_port|22)" || echo "   未找到相关规则"
+                else
+                    echo "   未检测到常见防火墙"
                 fi
                 ;;
-            2)
+                
+            4)
+                echo ""
+                echo "🔄 切换SSH监听模式"
+                echo "──────────────────"
+                
+                if [ "$has_socket" = false ]; then
+                    echo "⚠️  系统不支持ssh.socket模式"
+                    continue
+                fi
+                
+                echo "当前模式: $([ "$socket_active" = true ] && echo "Socket激活模式" || echo "传统Daemon模式")"
+                echo ""
+                echo "选择要切换的模式："
+                echo "   1. Socket激活模式 (systemd监听，按需启动SSH)"
+                echo "   2. 传统Daemon模式 (SSH服务常驻)"
+                echo "   0. 取消"
+                
+                read -p "请选择 [0-2]: " mode_choice
+                
+                case $mode_choice in
+                    1)
+                        if [ "$socket_active" = true ]; then
+                            echo "已经是Socket激活模式"
+                            continue
+                        fi
+                        
+                        echo "切换到Socket激活模式..."
+                        
+                        # 获取当前配置端口
+                        local config_port=$(grep -E "^\s*Port\s+" /etc/ssh/sshd_config 2>/dev/null | awk '{print $2}' | head -n 1)
+                        config_port=${config_port:-22}
+                        
+                        # 配置socket端口
+                        if [ -f /lib/systemd/system/ssh.socket ]; then
+                            sed -i "s/ListenStream=.*/ListenStream=$config_port/" /lib/systemd/system/ssh.socket
+                        else
+                            echo "ListenStream=$config_port" > /lib/systemd/system/ssh.socket
+                        fi
+                        
+                        # 重新加载并启动
+                        systemctl daemon-reload
+                        systemctl stop ssh.service
+                        systemctl enable --now ssh.socket
+                        
+                        echo "✅ 已切换到Socket激活模式"
+                        socket_active=true
+                        ;;
+                        
+                    2)
+                        if [ "$socket_active" = false ]; then
+                            echo "已经是传统Daemon模式"
+                            continue
+                        fi
+                        
+                        echo "切换到传统Daemon模式..."
+                        
+                        # 停止并禁用socket
+                        systemctl stop ssh.socket
+                        systemctl disable ssh.socket
+                        
+                        # 启动服务
+                        systemctl enable --now ssh.service
+                        
+                        echo "✅ 已切换到传统Daemon模式"
+                        socket_active=false
+                        ;;
+                        
+                    0)
+                        echo "操作取消"
+                        ;;
+                    *)
+                        echo "无效选择"
+                        ;;
+                esac
+                ;;
+                
+            5)
                 return
                 ;;
+                
             *)
-                echo "无效选择，请重试 😕"
+                echo "无效选择，请输入1-5之间的数字"
                 ;;
         esac
+        
+        echo ""
+        read -p "按回车键继续..."
     done
 }
-# 功能7：修改SSH密码 🔑
-change_ssh_password() {
-    echo "生成一个20位复杂密码 🔐..."
-    # 生成复杂密码，包含大小写字母、数字、特殊字符
-    new_pass=$(cat /dev/urandom | tr -dc 'a-zA-Z0-9!@#%^&*()_+' | head -c 20)
-    # 确保密码包含至少1个大写字母、1个小写字母、1个数字、1个特殊字符
-    while true; do
-        has_upper=$(echo "$new_pass" | grep -q '[A-Z]' && echo "yes" || echo "no")
-        has_lower=$(echo "$new_pass" | grep -q '[a-z]' && echo "yes" || echo "no")
-        has_digit=$(echo "$new_pass" | grep -q '[0-9]' && echo "yes" || echo "no")
-        has_special=$(echo "$new_pass" | grep -q '[!@#%^&*()_+]' && echo "yes" || echo "no")
-        if [ "$has_upper" = "yes" ] && [ "$has_lower" = "yes" ] && [ "$has_digit" = "yes" ] && [ "$has_special" = "yes" ]; then
-            break
+
+# 辅助函数：配置防火墙
+configure_firewall() {
+    local new_port="$1"
+    local old_port="$2"
+    
+    echo "配置防火墙规则..."
+    
+    # UFW
+    if command -v ufw >/dev/null 2>&1; then
+        if ufw status 2>/dev/null | grep -q "Status: active"; then
+            echo "检测到UFW防火墙..."
+            
+            # 添加新端口
+            if ufw allow "$new_port"/tcp; then
+                echo "✅ 已添加UFW规则：$new_port/tcp"
+            fi
+            
+            # 可选：删除旧端口
+            read -p "是否删除旧端口 $old_port 的防火墙规则？(y/n): " del_old
+            if [ "$del_old" = "y" ] || [ "$del_old" = "Y" ]; then
+                ufw delete allow "$old_port"/tcp
+                echo "已删除旧端口规则"
+            fi
+            
+            ufw reload
         fi
-        new_pass=$(cat /dev/urandom | tr -dc 'a-zA-Z0-9!@#%^&*()_+' | head -c 20)
-    done
-    echo "生成的密码：$new_pass"
-    echo "警告：修改后，仅新密码可用于登录，旧密码将失效 ❗"
-    echo "您可以直接使用以上生成的密码，或输入自定义密码。"
-    read -p "请输入新密码（可见，留空使用生成密码）： " pass1
-    if [ -z "$pass1" ]; then
-        pass1="$new_pass"
     fi
-    read -p "请再次确认新密码（可见）： " pass2
-    if [ "$pass1" != "$pass2" ]; then
-        echo "两次输入的密码不匹配，操作取消 😔"
+    
+    # firewalld
+    if command -v firewall-cmd >/dev/null 2>&1; then
+        if systemctl is-active firewalld >/dev/null 2>&1; then
+            echo "检测到firewalld..."
+            
+            # 添加新端口
+            firewall-cmd --permanent --add-port="$new_port/tcp"
+            
+            # 可选：删除旧端口
+            read -p "是否删除旧端口 $old_port 的防火墙规则？(y/n): " del_old
+            if [ "$del_old" = "y" ] || [ "$del_old" = "Y" ]; then
+                firewall-cmd --permanent --remove-port="$old_port/tcp"
+            fi
+            
+            firewall-cmd --reload
+            echo "✅ firewalld规则已更新"
+        fi
+    fi
+}
+
+# 功能7：修改SSH密码（LXC优化版） 🔑
+change_ssh_password() {
+    echo "🔐 SSH密码修改工具"
+    echo "═══════════════════════════════════════════"
+    
+    # 检测是否为LXC容器
+    local is_lxc=false
+    if grep -q "container=lxc" /proc/1/environ 2>/dev/null || [ -f /.lxc-boot-id ]; then
+        is_lxc=true
+        echo "检测到LXC容器环境，使用兼容模式 🐧"
+    fi
+    
+    # 检测是否为Debian 12+ (可能影响PAM配置)
+    local is_debian12=false
+    if [ -f /etc/debian_version ]; then
+        local debian_version=$(cat /etc/debian_version)
+        if [[ "$debian_version" == 12* ]] || [[ "$debian_version" == "bookworm"* ]]; then
+            is_debian12=true
+            echo "检测到Debian 12+，使用兼容的PAM配置"
+        fi
+    fi
+    
+    # 获取当前用户
+    local current_user=$(whoami)
+    echo "当前用户：$current_user"
+    
+    # 检查权限
+    if [ "$current_user" != "root" ]; then
+        if ! groups | grep -q sudo; then
+            echo "❌ 当前用户没有权限修改密码，需要root权限"
+            return 1
+        fi
+    fi
+    
+    # 选择要修改密码的用户
+    local target_user=""
+    if [ "$current_user" = "root" ]; then
+        echo ""
+        echo "可选用户："
+        awk -F: '{ if ($3>=1000 && $3<65534) print "   " $1 }' /etc/passwd 2>/dev/null | head -n 5
+        echo "   root"
+        echo ""
+        read -p "请输入要修改密码的用户名 [默认: root]: " input_user
+        target_user="${input_user:-root}"
+    else
+        target_user="$current_user"
+        echo "将修改当前用户 ($target_user) 的密码"
+    fi
+    
+    # 检查用户是否存在
+    if ! id "$target_user" >/dev/null 2>&1; then
+        echo "❌ 用户 $target_user 不存在"
         return
     fi
-    # 尝试修改密码
-    if echo "root:$pass1" | chpasswd; then
-        echo "SSH密码已更改，新密码为：$pass1 🎉"
-        echo "请保存新密码，并立即测试SSH登录（ssh root@your_server -p $current_port） ❗"
-        echo "如果无法登录，请检查："
-        echo " journalctl -xeu ssh.service"
+    
+    # 生成复杂密码
+    echo ""
+    echo "生成强密码..."
+    
+    # 定义字符集
+    local upper_chars='ABCDEFGHIJKLMNOPQRSTUVWXYZ'
+    local lower_chars='abcdefghijklmnopqrstuvwxyz'
+    local digit_chars='0123456789'
+    local special_chars='!@#$%^&*()_+-='
+    
+    # 生成20位密码，确保包含各类字符
+    local password=""
+    
+    # 首先确保每种类型至少一个
+    password="${password}${upper_chars:$((RANDOM % ${#upper_chars})):1}"
+    password="${password}${lower_chars:$((RANDOM % ${#lower_chars})):1}"
+    password="${password}${digit_chars:$((RANDOM % ${#digit_chars})):1}"
+    password="${password}${special_chars:$((RANDOM % ${#special_chars})):1}"
+    
+    # 填充剩余字符
+    local all_chars="${upper_chars}${lower_chars}${digit_chars}${special_chars}"
+    for i in {1..16}; do
+        password="${password}${all_chars:$((RANDOM % ${#all_chars})):1}"
+    done
+    
+    # 打乱密码顺序
+    password=$(echo "$password" | fold -w1 | shuf | tr -d '\n')
+    
+    echo "生成密码：$password"
+    echo ""
+    
+    # 密码输入选项
+    echo "请选择："
+    echo "  1. 使用生成的密码"
+    echo "  2. 手动输入密码"
+    echo "  0. 取消"
+    
+    read -p "请选择 [0-2]: " pass_choice
+    
+    case $pass_choice in
+        1)
+            pass1="$password"
+            ;;
+        2)
+            read -sp "请输入新密码（输入时不显示）: " pass1
+            echo ""
+            read -sp "请再次确认新密码: " pass2
+            echo ""
+            
+            if [ "$pass1" != "$pass2" ]; then
+                echo "❌ 两次输入的密码不匹配"
+                return
+            fi
+            
+            if [ -z "$pass1" ]; then
+                echo "❌ 密码不能为空"
+                return
+            fi
+            ;;
+        0|*)
+            echo "操作取消"
+            return
+            ;;
+    esac
+    
+    # 密码强度检查
+    echo ""
+    echo "检查密码强度..."
+    local strength_issues=0
+    
+    if [ ${#pass1} -lt 8 ]; then
+        echo "⚠️  长度不足8位"
+        strength_issues=$((strength_issues + 1))
+    fi
+    
+    if ! echo "$pass1" | grep -q '[A-Z]'; then
+        echo "⚠️  缺少大写字母"
+        strength_issues=$((strength_issues + 1))
+    fi
+    
+    if ! echo "$pass1" | grep -q '[a-z]'; then
+        echo "⚠️  缺少小写字母"
+        strength_issues=$((strength_issues + 1))
+    fi
+    
+    if ! echo "$pass1" | grep -q '[0-9]'; then
+        echo "⚠️  缺少数字"
+        strength_issues=$((strength_issues + 1))
+    fi
+    
+    if ! echo "$pass1" | grep -q '[!@#$%^&*()_+-=]'; then
+        echo "⚠️  缺少特殊字符"
+        strength_issues=$((strength_issues + 1))
+    fi
+    
+    if [ $strength_issues -gt 2 ]; then
+        echo ""
+        echo "⚠️  密码强度较弱"
+        read -p "是否继续使用此密码？(y/n): " confirm
+        if [ "$confirm" != "y" ] && [ "$confirm" != "Y" ]; then
+            echo "操作取消"
+            return
+        fi
     else
-        echo "密码修改失败 😔 请检查："
-        echo " journalctl -xeu ssh.service"
-        echo "您可以尝试手动修改密码：sudo passwd root"
+        echo "✅ 密码强度符合要求"
+    fi
+    
+    # 确认修改
+    echo ""
+    echo "将修改用户 $target_user 的密码"
+    read -p "确认修改？(y/n): " confirm
+    if [ "$confirm" != "y" ] && [ "$confirm" != "Y" ]; then
+        echo "操作取消"
+        return
+    fi
+    
+    # 尝试修改密码
+    echo ""
+    echo "正在修改密码..."
+    local success=false
+    
+    # 方法1：chpasswd
+    if echo "$target_user:$pass1" | chpasswd 2>/dev/null; then
+        success=true
+    # 方法2：passwd
+    elif echo -e "$pass1\n$pass1" | passwd "$target_user" 2>/dev/null; then
+        success=true
+    # 方法3：LXC特殊处理
+    elif [ "$is_lxc" = true ] && command -v lxc-attach >/dev/null 2>&1; then
+        if lxc-attach -n "$(hostname)" -- bash -c "echo '$target_user:$pass1' | chpasswd" 2>/dev/null; then
+            success=true
+        fi
+    fi
+    
+    if [ "$success" = true ]; then
+        echo ""
+        echo "✅ 密码修改成功！"
+        echo "═══════════════════════════════════════════"
+        echo "用户: $target_user"
+        echo "新密码: $pass1"
+        echo "═══════════════════════════════════════════"
+        echo ""
+        echo "⚠️  请立即保存密码并测试登录"
+        
+        # 获取当前SSH端口
+        local ssh_port=$(grep -E "^\s*Port\s+" /etc/ssh/sshd_config 2>/dev/null | awk '{print $2}' | head -n 1)
+        ssh_port=${ssh_port:-22}
+        
+        echo ""
+        echo "测试登录命令："
+        echo "   ssh -p $ssh_port $target_user@服务器IP"
+        echo ""
+        
+        if [ "$is_debian12" = true ]; then
+            echo "Debian 12+ 提示："
+            echo "   如果遇到PAM相关错误，请检查："
+            echo "   - /etc/pam.d/common-password"
+            echo "   - /etc/security/pwquality.conf"
+        fi
+    else
+        echo "❌ 密码修改失败"
+        echo ""
+        echo "可能的原因："
+        echo "   1. 权限不足"
+        echo "   2. PAM配置限制"
+        echo "   3. 账户被锁定"
+        echo ""
+        echo "尝试手动修改："
+        echo "   passwd $target_user"
+        
+        # 检查PAM配置
+        if [ -f /etc/pam.d/common-password ]; then
+            echo ""
+            echo "当前PAM密码策略："
+            grep -v "^#" /etc/pam.d/common-password | grep "pam_" || echo "   未找到特殊策略"
+        fi
     fi
 }
 # 功能8：SSH密钥登录管理 🔑

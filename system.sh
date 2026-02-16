@@ -1528,7 +1528,7 @@ while true; do
 
     # 菜单标题（仅文字）
     echo -e "${WHITE}System-Easy功能菜单${NC}"
-    
+
     # 两列菜单（无框，只有颜色标记）
     echo -e "${YELLOW}[1]${NC} 安装常用工具 🛠️       ${YELLOW}[12]${NC} 更新脚本 📥"
     echo -e "${YELLOW}[2]${NC} 日志清理管理 🗑️       ${YELLOW}[13]${NC} 查看端口占用 🔍"
@@ -1539,8 +1539,9 @@ while true; do
     echo -e "${YELLOW}[7]${NC} 修改SSH密码 🔑       ${YELLOW}[18]${NC} SWAP管理 💾"
     echo -e "${YELLOW}[8]${NC} SSH密钥登录管理 🔑   ${YELLOW}[19]${NC} TFO管理 🚀"
     echo -e "${YELLOW}[9]${NC} 卸载脚本 🗑️          ${YELLOW}[20]${NC} 网络排查工具 🔧"
-    echo -e "${YELLOW}[11]${NC} DDNS 管理 🌐        ${YELLOW}[21]${NC} 退出 🚪"
-    
+    echo -e "${YELLOW}[10]${NC} 设置时区与时间同步 ⏰  ${YELLOW}[21]${NC} 退出 🚪"
+    echo -e "${YELLOW}[11]${NC} DDNS 管理 🌐"
+
     echo ""  # 空行
     read -p "请输入您的选择 [1-21]： " main_choice
 
@@ -1554,7 +1555,7 @@ while true; do
         7) change_ssh_password ;;
         8) ssh_key_management ;;
         9) uninstall_script ;;
-        10) set_timezone ;;
+        10) set_timezone ;;  # 恢复选项10
         11) ddns_menu ;;
         12) update_script ;;
         13) check_port_usage ;;

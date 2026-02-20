@@ -2123,7 +2123,7 @@ ddns_menu() {
         echo "❌ 安装失败，请检查权限或系统状态 😔"
     fi
 }
-# 新增功能18：TCP Fast Open (TFO) 管理子菜单 🚀
+# 功能18：TCP Fast Open (TFO) 管理子菜单 🚀
 tfo_menu() {
     while true; do
         echo "TCP Fast Open (TFO) 管理菜单 🚀："
@@ -2192,14 +2192,22 @@ tfo_menu() {
     done
 }
 
-# 功能19：安装网络排查工具 🔧 (TCPing, MTR, NextTrace, Speedtest)
+# 功能19：安装网络排查工具 🔧 (TCPing, MTR, NextTrace, Speedtest, iperf3)
 install_network_tools() {
     echo "正在安装网络排查工具套件 🔧..."
-    echo "包含：TCPing、MTR、NextTrace、Speedtest"
+    echo "包含：TCPing、tcptraceroute、MTR、NextTrace、Speedtest、iperf3"
     echo "----------------------------------------"
+
+    # 1. 安装 TCPing 及相关依赖
+    echo "📡 正在安装 TCPing 和 tcptraceroute..."
+    # 安装 tcptraceroute 和 bc
+    if apt update -y && apt install -y tcptraceroute bc; then
+        echo "   ✅ tcptraceroute 和 bc 安装成功"
+    else
+        echo "   ❌ tcptraceroute 或 bc 安装失败，请检查网络连接"
+    fi
     
-    # 1. 安装 TCPing
-    echo "📡 正在安装 TCPing..."
+    # 安装 tcping
     if wget -q --show-progress http://www.vdberg.org/~richard/tcpping -O /usr/bin/tcping; then
         chmod +x /usr/bin/tcping
         echo "   ✅ TCPing 安装成功"
@@ -2208,7 +2216,7 @@ install_network_tools() {
         echo "   ❌ TCPing 安装失败，请检查网络连接"
     fi
     echo ""
-    
+
     # 2. 安装 MTR (通过apt)
     echo "🖧 正在安装 MTR (通过apt)..."
     if apt update -y && apt install -y mtr-tiny; then
@@ -2218,7 +2226,7 @@ install_network_tools() {
         echo "   ❌ MTR 安装失败，请检查网络连接或软件源"
     fi
     echo ""
-    
+
     # 3. 安装 NextTrace
     echo "📍 正在安装 NextTrace..."
     if curl -sL nxtrace.org/nt | bash; then
@@ -2228,7 +2236,7 @@ install_network_tools() {
         echo "   ❌ NextTrace 安装失败，请检查网络连接"
     fi
     echo ""
-    
+
     # 4. 安装 Speedtest
     echo "⚡ 正在安装 Speedtest 测速工具..."
     # 安装curl（如果未安装）
@@ -2244,17 +2252,32 @@ install_network_tools() {
         echo "   ❌ Speedtest 安装失败，请检查网络连接"
     fi
     echo ""
-    
+
+    # 5. 安装 iperf3
+    echo "📊 正在安装 iperf3 带宽测试工具..."
+    if apt update -y && apt install -y iperf3; then
+        echo "   ✅ iperf3 安装成功"
+        echo "   使用方法："
+        echo "     服务器端：iperf3 -s"
+        echo "     客户端：iperf3 -c <服务器IP>"
+    else
+        echo "   ❌ iperf3 安装失败，请检查网络连接"
+    fi
+    echo ""
+
     echo "========================================"
     echo "🎉 网络排查工具套件安装完成！"
     echo ""
     echo "📌 工具汇总："
-    echo "   • TCPing  : tcping <IP> <端口>"
-    echo "   • MTR     : mtr <目标>"
-    echo "   • NextTrace: nexttrace <目标>"
-    echo "   • Speedtest: speedtest"
+    echo "   • TCPing      : tcping <IP> <端口>"
+    echo "   • tcptraceroute: tcptraceroute <目标>"
+    echo "   • bc          : 计算器工具"
+    echo "   • MTR         : mtr <目标>"
+    echo "   • NextTrace   : nexttrace <目标>"
+    echo "   • Speedtest   : speedtest"
+    echo "   • iperf3      : iperf3 带宽测试工具"
     echo ""
-    
+
     echo "按回车键返回菜单 🔙"
     read
 }

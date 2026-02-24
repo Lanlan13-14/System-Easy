@@ -2211,7 +2211,7 @@ install_network_tools() {
     if wget -q --show-progress https://raw.githubusercontent.com/Lanlan13-14/System-Easy/refs/heads/main/tcping.sh -O /usr/bin/tcping; then
         chmod +x /usr/bin/tcping
         echo "   ✅ TCPing 安装成功"
-        echo "   使用方法：tcping <目标IP> <目标端口>"
+        echo "   使用方法：tcping -p <目标端口> <目标IP>"
     else
         echo "   ❌ TCPing 安装失败，请检查网络连接"
     fi
@@ -2269,7 +2269,7 @@ install_network_tools() {
     echo "🎉 网络排查工具套件安装完成！"
     echo ""
     echo "📌 工具汇总："
-    echo "   • TCPing      : tcping <IP> <端口>"
+    echo "   • TCPing      : tcping -p <目标端口> <目标IP>"
     echo "   • tcptraceroute: tcptraceroute <目标>"
     echo "   • bc          : 计算器工具"
     echo "   • MTR         : mtr <目标>"

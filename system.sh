@@ -2208,7 +2208,7 @@ install_network_tools() {
     fi
     
     # 安装 tcping
-    if wget -q --show-progress http://www.vdberg.org/~richard/tcpping -O /usr/bin/tcping; then
+    if wget -q --show-progress https://raw.githubusercontent.com/Lanlan13-14/System-Easy/refs/heads/main/tcping.sh -O /usr/bin/tcping; then
         chmod +x /usr/bin/tcping
         echo "   ✅ TCPing 安装成功"
         echo "   使用方法：tcping <目标IP> <目标端口>"

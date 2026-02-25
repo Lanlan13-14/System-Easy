@@ -78,17 +78,18 @@ print_stats() {
 trap print_stats INT
 
 while :; do
-  start=$(date +%s%3N)
+  start=$(date +%s%N)
 
   timeout "$timeout" bash -c "echo > /dev/tcp/$dest/$port" 2>/dev/null
   ret=$?
 
-  end=$(date +%s%3N)
-  rtt=$((end-start))
+  end=$(date +%s%N)
+  rtt_ns=$((end-start))
+  ms=$(echo "scale=2; $rtt_ns/1000000" | bc)
+
   sent=$((sent+1))
 
   if [ $ret -eq 0 ]; then
-    ms=$(echo "scale=2; $rtt/1" | bc)
     echo "connected to $dest:$port, seq=$seq time=${ms} ms"
     update_stats "$ms"
   else

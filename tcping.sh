@@ -7,34 +7,35 @@ timeout=3
 seq=0
 sent=0
 ok=0
-min=0
+min=-1
 max=0
 sum=0
+quiet=0
 
 usage() {
 cat <<EOF
-Usage
-tcping [options] <destination>
+Usage:
+  tcping [options] <destination>
 
 Options:
   <destination>      dns name or ip address
-  -c <count>         count how many times to connect
-  -f                 flood connect (no delays)
+  -c <count>         count how many times to probe
+  -i <interval>      interval seconds between probes (default 1)
+  -p <port>          port number (default 80)
+  -q                 quiet (only statistics)
+  -t <timeout>       timeout seconds (default 3)
   -h                 print help and exit
-  -i <interval>      interval delay between each connect (e.g. 1)
-  -p <port>          portnr portnumber (e.g. 80)
-  -q                 quiet, only returncode
-  -t <timeout>       time to wait for response (e.g. 3)
 EOF
 exit 0
 }
 
-while getopts "c:fi:p:qt:h" opt; do
+while getopts "c:i:p:qt:h" opt; do
   case $opt in
     c) count=$OPTARG ;;
     i) interval=$OPTARG ;;
     p) port=$OPTARG ;;
     t) timeout=$OPTARG ;;
+    q) quiet=1 ;;
     h) usage ;;
     *) usage ;;
   esac
@@ -44,14 +45,21 @@ shift $((OPTIND-1))
 dest="$1"
 [ -z "$dest" ] && usage
 
-echo "tcping $dest:$port"
+command -v tcptraceroute >/dev/null 2>&1 || {
+  echo "Error: tcptraceroute not installed"
+  exit 1
+}
+
+fmt2() {
+  printf "%.2f" "$1"
+}
 
 update_stats() {
   rtt="$1"
   ((ok++))
   sum=$(echo "$sum + $rtt" | bc)
 
-  if [ "$min" = "0" ] || (( $(echo "$rtt < $min" | bc) )); then
+  if (( $(echo "$min < 0 || $rtt < $min" | bc) )); then
     min=$rtt
   fi
   if (( $(echo "$rtt > $max" | bc) )); then
@@ -61,39 +69,42 @@ update_stats() {
 
 print_stats() {
   if [ "$ok" -gt 0 ]; then
-    avg=$(echo "scale=1; $sum / $ok" | bc)
+    avg=$(echo "scale=4; $sum / $ok" | bc)
   else
     avg=0
     min=0
     max=0
   fi
+
   fail=$((sent-ok))
-  loss=$(echo "scale=2; $fail*100/$sent" | bc 2>/dev/null)
-  echo "--- $dest:$port ping statistics ---"
-  echo "$sent connects, $ok ok, $loss% failed"
-  echo "round-trip min/avg/max = $min/$avg/$max ms"
+  if [ "$sent" -gt 0 ]; then
+    loss=$(echo "scale=2; $fail*100/$sent" | bc)
+  else
+    loss=0
+  fi
+
+  printf -- "--- %s:%s tcping statistics ---\n" "$dest" "$port"
+  printf "%d probes, %d success, %d failed (%.2f%% loss)\n" "$sent" "$ok" "$fail" "$loss"
+  printf "round-trip min/avg/max = %s/%s/%s ms\n" "$(fmt2 "$min")" "$(fmt2 "$avg")" "$(fmt2 "$max")"
   exit 0
 }
 
-trap print_stats INT
+trap print_stats INT TERM
+
+[ "$quiet" -eq 0 ] && echo "tcping $dest:$port"
 
 while :; do
-  start=$(date +%s%N)
+  out=$(tcptraceroute -n -f 255 -m 255 -q 1 -w "$timeout" "$dest" "$port" 2>/dev/null)
+  rtt=$(echo "$out" | sed 's/.*] //' | awk '{print $1}')
 
-  timeout "$timeout" bash -c "echo > /dev/tcp/$dest/$port" 2>/dev/null
-  ret=$?
+  ((sent++))
 
-  end=$(date +%s%N)
-  rtt_ns=$((end-start))
-  ms=$(echo "scale=2; $rtt_ns/1000000" | bc)
-
-  sent=$((sent+1))
-
-  if [ $ret -eq 0 ]; then
-    echo "connected to $dest:$port, seq=$seq time=${ms} ms"
-    update_stats "$ms"
+  if [[ "$rtt" =~ ^[0-9.]+$ ]]; then
+    rtt_fmt=$(fmt2 "$rtt")
+    [ "$quiet" -eq 0 ] && echo "connected to $dest:$port, seq=$seq time=${rtt_fmt} ms"
+    update_stats "$rtt"
   else
-    echo "no response from $dest:$port, seq=$seq"
+    [ "$quiet" -eq 0 ] && echo "no response from $dest:$port, seq=$seq"
   fi
 
   ((seq++))

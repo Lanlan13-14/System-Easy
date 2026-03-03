@@ -10,6 +10,11 @@ sudo system-easy
 ```
 ### 3. 卸载
 ##### 卸载选项在脚本中已提供
+#### 4.GitHub加速的配置文件位于：
+
+```
+/etc/system-easy/proxy.conf
+```
 #### 仅bbr优化
 ```
 bash <(curl -fsSL https://raw.githubusercontent.com/Lanlan13-14/System-Easy/refs/heads/main/bbr.sh)

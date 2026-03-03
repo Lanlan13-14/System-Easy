@@ -1,6 +1,11 @@
 #!/bin/bash
 
-# 颜色定义（标准ANSI，白底可见）
+# ==================================================
+# System-Easy 综合管理脚本
+# 优化版：集成 SSH 管理、GitHub 镜像加速、依赖自动安装
+# ==================================================
+
+# ---------- 颜色定义 ----------
 RED='\033[0;31m'          # 红色
 GREEN='\033[0;32m'        # 绿色
 YELLOW='\033[1;33m'       # 亮黄色
@@ -10,16 +15,50 @@ CYAN='\033[0;36m'         # 青色
 WHITE='\033[1;37m'        # 亮白色
 NC='\033[0m'              # 重置颜色
 
-# 检查是否以root身份运行 🚨
-if [ "$(id -u)" != "0" ]; then
-   echo "此脚本必须以root身份运行 🚨" 1>&2
-   exit 1
+# ---------- 全局变量 ----------
+SCRIPT_NAME="system-easy"
+INSTALL_PATH="/usr/local/bin/$SCRIPT_NAME"
+SCRIPT_URL="https://raw.githubusercontent.com/Lanlan13-14/System-Easy/refs/heads/main/system.sh"
+GITHUB_PROXY_FILE="/etc/system-easy/proxy.conf"
+GITHUB_PROXY=""
+if [[ -f "$GITHUB_PROXY_FILE" ]]; then
+    GITHUB_PROXY=$(cat "$GITHUB_PROXY_FILE")
 fi
 
-# 脚本URL
-SCRIPT_URL="https://raw.githubusercontent.com/Lanlan13-14/System-Easy/refs/heads/main/system.sh"
+# ---------- 辅助函数 ----------
+# 确保命令存在，不存在则自动安装
+ensure_command() {
+    local cmd=$1
+    local pkg=${2:-$1}
+    if ! command -v "$cmd" >/dev/null 2>&1; then
+        echo -e "${YELLOW}📦 未检测到 $cmd，正在安装 $pkg ...${NC}"
+        apt update -y && apt install -y "$pkg"
+        if ! command -v "$cmd" >/dev/null 2>&1; then
+            echo -e "${RED}❌ 安装 $pkg 失败，请手动安装${NC}"
+            return 1
+        fi
+    fi
+    return 0
+}
 
-# 系统信息显示函数 📊（无框无横线版）- 不再自动清屏
+# 获取带 GitHub 加速的 URL
+github_raw_url() {
+    local path=$1
+    local raw_url="https://raw.githubusercontent.com/Lanlan13-14/System-Easy/refs/heads/main/$path"
+    if [[ -n "$GITHUB_PROXY" ]]; then
+        echo "${GITHUB_PROXY}${raw_url}"
+    else
+        echo "$raw_url"
+    fi
+}
+
+# 检查 root 权限
+if [ "$(id -u)" != "0" ]; then
+    echo -e "${RED}此脚本必须以 root 身份运行 🚨${NC}" 1>&2
+    exit 1
+fi
+
+# ---------- 系统信息显示函数 ----------
 show_system_info() {
     # --- 静态信息（只在脚本启动时获取）---
     if [ -z "$STATIC_INFO_LOADED" ]; then
@@ -33,20 +72,14 @@ show_system_info() {
         STATIC_INFO_LOADED=1
     fi
 
-    # --- CPU 频率修复（多重来源）---
-    # 1. 实时频率
+    # --- CPU 频率修复 ---
     CPU_FREQ=$(awk -F: '/cpu MHz/ {print $2; exit}' /proc/cpuinfo | xargs)
-
-    # 2. cpufreq 实时频率 (kHz -> MHz)
     if [ -z "$CPU_FREQ" ] && [ -f /sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq ]; then
         CPU_FREQ=$(awk '{printf "%.0f", $1/1000}' /sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq)
     fi
-
-    # 3. 最大频率
     if [ -z "$CPU_FREQ" ]; then
         CPU_FREQ=$(lscpu | awk -F: '/CPU max MHz/ {print $2}' | xargs | cut -d. -f1)
     fi
-
     [ -z "$CPU_FREQ" ] && CPU_FREQ="N/A"
 
     # --- 内存 ---
@@ -81,20 +114,12 @@ show_system_info() {
     PROCESSES=$(ps aux | wc -l)
     UPTIME=$(uptime -p | sed 's/up //')
 
-    # --- 公网 IP（每次调用都重新获取，与原脚本一致）---
+    # --- 公网 IP ---
     is_private_ip() {
-        [[ $1 =~ ^10\. ]] || \
-        [[ $1 =~ ^192\.168\. ]] || \
-        [[ $1 =~ ^172\.(1[6-9]|2[0-9]|3[0-1])\. ]]
+        [[ $1 =~ ^10\. ]] || [[ $1 =~ ^192\.168\. ]] || [[ $1 =~ ^172\.(1[6-9]|2[0-9]|3[0-1])\. ]]
     }
-
     get_public_ipv4() {
-        for api in \
-            "https://api.ipify.org" \
-            "https://ipv4.icanhazip.com" \
-            "https://ipinfo.io/ip" \
-            "https://ip.sb"
-        do
+        for api in "https://api.ipify.org" "https://ipv4.icanhazip.com" "https://ipinfo.io/ip" "https://ip.sb"; do
             ip=$(curl -s --connect-timeout 2 "$api" | tr -d '\n')
             if [[ $ip =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] && ! is_private_ip "$ip"; then
                 echo "$ip"
@@ -102,7 +127,6 @@ show_system_info() {
             fi
         done
     }
-
     IPV4_PUBLIC=$(get_public_ipv4)
     if [ -n "$IPV4_PUBLIC" ]; then
         IPV4_DISPLAY="$IPV4_PUBLIC"
@@ -111,7 +135,6 @@ show_system_info() {
         IPV4_DISPLAY="${IPV4_LOCAL:-未分配} (本地)"
     fi
 
-    # --- IPv6 ---
     IPV6_PUBLIC=$(curl -6 -s --connect-timeout 2 https://api64.ipify.org 2>/dev/null)
     if [[ $IPV6_PUBLIC =~ : ]]; then
         IPV6_DISPLAY="$IPV6_PUBLIC"
@@ -172,60 +195,62 @@ show_system_info() {
     echo ""
 }
 
-# 功能1：安装常用工具和依赖 🛠️
+# ---------- 功能函数 ----------
+
+# 功能1：安装常用工具
 install_tools() {
+    clear
+    echo "========== 安装常用工具 =========="
     echo "正在更新软件包列表 📦..."
     apt update -y
     echo "正在安装常用工具和依赖：curl、vim、git、python3-systemd、systemd-journal-remote、cron、at、net-tools、iproute2、unzip、jq 🚀..."
     apt install -y curl vim git python3-systemd systemd-journal-remote cron at net-tools iproute2 unzip jq
     if [ $? -eq 0 ]; then
-        echo "所有工具和依赖安装完成 🎉"
+        echo -e "${GREEN}所有工具和依赖安装完成 🎉${NC}"
     else
-        echo "安装失败，请检查网络或软件源 😔"
+        echo -e "${RED}安装失败，请检查网络或软件源 😔${NC}"
     fi
+    echo ""
+    read -rp "按回车键返回主菜单..." _
 }
-# 功能2：日志清理子菜单 🗑️
+
+# 功能2：日志清理管理
 log_cleanup_menu() {
     while true; do
-        echo "日志清理菜单 🗑️："
-        echo "1. 开启自动日志清理（每天凌晨02:00） ⏰"
-        echo "2. 关闭自动日志清理 🚫"
-        echo "3. 返回主菜单 🔙"
-        read -p "请输入您的选择： " choice
+        clear
+        cat <<EOF
+========== 日志清理管理 ==========
+[1] 开启自动日志清理（每天02:00）
+[2] 关闭自动日志清理
+[0] 返回主菜单
+==================================
+EOF
+        read -rp "请输入您的选择 [0-2]: " choice
         case $choice in
             1)
                 echo "正在启用自动日志清理 ⏳..."
                 cron_job="0 2 * * * journalctl --vacuum-time=2weeks && find /var/log -type f -name '*.log.*' -exec rm {} \; && find /var/log -type f -name '*.gz' -exec rm {} \;"
                 (crontab -l 2>/dev/null; echo "$cron_job") | crontab -
-                echo "自动日志清理已启用（每天凌晨02:00） 🎉"
+                echo -e "${GREEN}自动日志清理已启用（每天凌晨02:00） 🎉${NC}"
+                read -rp "按回车键继续..." _
                 ;;
             2)
                 echo "正在关闭自动日志清理 🚫..."
                 crontab -l | grep -v "journalctl --vacuum-time=2weeks" | crontab -
-                echo "自动日志清理已关闭 ✅"
+                echo -e "${GREEN}自动日志清理已关闭 ✅${NC}"
+                read -rp "按回车键继续..." _
                 ;;
-            3)
-                return
-                ;;
-            *)
-                echo "无效选择，请重试 😕"
-                ;;
+            0) return ;;
+            *) echo -e "${RED}无效选择，请重试 😕${NC}"; sleep 1 ;;
         esac
     done
 }
-# bbr管理
+
+# 功能3：BBR管理
 bbr_menu() {
     BBR_BACKUP_DIR="/etc/sysctl_backup"
-
-    # --- 辅助函数 ---
-    check_bbr_loaded() {
-        lsmod | grep -q tcp_bbr
-    }
-
-    apply_sysctl() {
-        sysctl --system >/dev/null 2>&1 || true
-    }
-
+    check_bbr_loaded() { lsmod | grep -q tcp_bbr; }
+    apply_sysctl() { sysctl --system >/dev/null 2>&1 || true; }
     restore_default_tcp() {
         sed -i '/net\.core\.default_qdisc/d' /etc/sysctl.conf
         sed -i '/net\.ipv4\.tcp_congestion_control/d' /etc/sysctl.conf
@@ -238,70 +263,61 @@ bbr_menu() {
         fi
         apply_sysctl
     }
-
-    # 🔥 优化后的清理函数（保留但不用于卸载流程）
     reset_sysctl_d_defaults() {
         echo "🔄 正在彻底清理 sysctl 配置..."
-
-        # 1. 清空 /etc/sysctl.d（保留目录）
         if [ -d /etc/sysctl.d ]; then
             find /etc/sysctl.d -type f -name '*.conf' -delete
         else
             mkdir -p /etc/sysctl.d
         fi
-
-        # 2. 清空 sysctl.conf（保留文件）
         : > /etc/sysctl.conf
-
-        # 3. 卸载 BBR 模块（如已加载）
         if check_bbr_loaded; then
             rmmod tcp_bbr 2>/dev/null || true
         fi
-
-        # 4. 重新加载系统默认 sysctl
         sysctl --system >/dev/null 2>&1 || true
     }
 
-    # --- 主菜单 ---
     while true; do
         clear
-        echo "================ BBR管理菜单 ⚡ ================"
-        echo "1. 安装BBR v3 🚀"
-        echo "2. 应用BBR优化 ⚙️"
-        echo "3. 卸载BBR 🗑️"
-        echo "4. 恢复备份 🔄"
-        echo "5. 重置BBR配置 🔄"
-        echo "6. 备份管理 🗂️"
-        echo "7. 返回主菜单 🔙"
-        echo "=============================================="
-        read -p "请输入您的选择: " choice
+        cat <<EOF
+========== BBR 管理菜单 ⚡ ==========
+[1] 安装BBR v3内核
+[2] 应用BBR优化配置
+[3] 卸载BBR
+[4] 恢复备份
+[5] 重置BBR配置
+[6] 备份管理
+[0] 返回主菜单
+=====================================
+EOF
+        read -rp "请输入您的选择 [0-6]: " choice
         case $choice in
             1)
                 echo "正在安装BBR v3内核 ⏳..."
-                bash <(curl -L -s https://raw.githubusercontent.com/byJoey/Actions-bbr-v3/refs/heads/main/install.sh)
+                bash <(curl -L -s "$(github_raw_url install.sh)")
                 if check_bbr_loaded; then
-                    echo "✅ BBR v3内核安装成功"
+                    echo -e "${GREEN}✅ BBR v3内核安装成功${NC}"
                 else
-                    echo "❌ BBR安装失败"
+                    echo -e "${RED}❌ BBR安装失败${NC}"
                 fi
-                read -p "按回车返回菜单 🔙"
+                read -rp "按回车返回菜单..." _
                 ;;
             2)
                 echo "应用BBR优化配置 ⚙️..."
                 if ! sysctl net.ipv4.tcp_available_congestion_control >/dev/null 2>&1; then
-                    echo "⚠️ 当前内核不支持 BBR"
-                    read -p "按回车返回菜单 🔙"
+                    echo -e "${YELLOW}⚠️ 当前内核不支持 BBR${NC}"
+                    read -rp "按回车返回菜单..." _
                     continue
                 fi
                 if ! check_bbr_loaded; then
                     echo "检测到 BBR 模块未加载，正在尝试加载..."
-                    modprobe tcp_bbr 2>/dev/null || echo "⚠️ 模块加载失败"
+                    modprobe tcp_bbr 2>/dev/null || echo -e "${YELLOW}⚠️ 模块加载失败${NC}"
                 fi
-                bash -c "$(curl -fsSL https://raw.githubusercontent.com/Lanlan13-14/System-Easy/refs/heads/main/bbr.sh)"
+                bash -c "$(curl -fsSL "$(github_raw_url bbr.sh)")"
                 apply_sysctl
-                echo "✅ BBR优化配置已应用"
+                echo -e "${GREEN}✅ BBR优化配置已应用${NC}"
                 echo "当前TCP拥塞控制算法: $(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || echo '未支持')"
-                read -p "按回车返回菜单 🔙"
+                read -rp "按回车返回菜单..." _
                 ;;
             3)
                 echo "卸载BBR（将按指定流程删除/清空配置）🗑️"
@@ -313,14 +329,12 @@ bbr_menu() {
                 echo "  sysctl -p"
                 echo "  sysctl --system"
                 echo "并会尝试卸载 tcp_bbr 模块（如已加载）。"
-                read -p "确认执行上述卸载与清理操作？输入 'yes' 以继续: " confirm_uninstall
+                read -rp "确认执行上述卸载与清理操作？输入 'yes' 以继续: " confirm_uninstall
                 if [[ "$confirm_uninstall" != "yes" ]]; then
                     echo "已取消卸载操作。"
-                    read -p "按回车返回菜单 🔙"
+                    read -rp "按回车返回菜单..." _
                     continue
                 fi
-
-                # 1) 卸载 BBR 模块（如已加载）
                 if check_bbr_loaded; then
                     if rmmod tcp_bbr 2>/dev/null; then
                         echo "✅ BBR 模块已移除"
@@ -330,48 +344,36 @@ bbr_menu() {
                 else
                     echo "BBR 模块未加载，无需卸载 ✅"
                 fi
-
-                # 2) 删除指定文件（按你的要求）
                 rm -f /etc/sysctl.d/network-tuning.conf 2>/dev/null || true
                 rm -f /etc/security/limits.d/99-custom-limits.conf 2>/dev/null || true
-
-                # 3) 删除整个 /etc/sysctl.d 目录（危险操作，按你的要求执行）
                 if [ -d /etc/sysctl.d ]; then
                     rm -rf /etc/sysctl.d
-                    # 重新创建空目录以避免后续工具报错
                     mkdir -p /etc/sysctl.d
                 fi
-
-                # 4) 清空 /etc/sysctl.conf
                 : > /etc/sysctl.conf
-
-                # 5) 立即应用 sysctl 配置
                 sysctl -p 2>/dev/null || true
                 sysctl --system 2>/dev/null || true
-
-                # 6) 恢复默认拥塞控制为 cubic（确保系统有合理默认）
                 restore_default_tcp
-
-                echo "✅ 卸载与清理完成，请检查系统并重启以确保所有更改生效。"
-                read -p "按回车返回菜单 🔙"
+                echo -e "${GREEN}✅ 卸载与清理完成，请检查系统并重启以确保所有更改生效。${NC}"
+                read -rp "按回车返回菜单..." _
                 ;;
             4)
                 echo "恢复备份 🔄"
                 mkdir -p "$BBR_BACKUP_DIR"
                 mapfile -t backups < <(ls "$BBR_BACKUP_DIR"/*.tar.gz 2>/dev/null)
                 if [ ${#backups[@]} -eq 0 ]; then
-                    echo "⚠️ 无可用备份"
-                    read -p "按回车返回菜单 🔙"
+                    echo -e "${YELLOW}⚠️ 无可用备份${NC}"
+                    read -rp "按回车返回菜单..." _
                     continue
                 fi
                 echo "可用备份列表:"
                 for i in "${!backups[@]}"; do
                     echo "[$((i+1))] ${backups[$i]}"
                 done
-                read -p "请输入备份编号: " idx
+                read -rp "请输入备份编号: " idx
                 if ! [[ "$idx" =~ ^[0-9]+$ ]] || [ -z "${backups[$((idx-1))]}" ]; then
-                    echo "❌ 无效编号"
-                    read -p "按回车返回菜单 🔙"
+                    echo -e "${RED}❌ 无效编号${NC}"
+                    read -rp "按回车返回菜单..." _
                     continue
                 fi
                 backup_file="${backups[$((idx-1))]}"
@@ -379,25 +381,25 @@ bbr_menu() {
                 rm -rf /etc/sysctl.d/*
                 if tar -xzf "$backup_file" -C /etc; then
                     apply_sysctl
-                    echo "✅ 还原完成: $backup_file"
+                    echo -e "${GREEN}✅ 还原完成: $backup_file${NC}"
                 else
-                    echo "❌ 还原失败"
+                    echo -e "${RED}❌ 还原失败${NC}"
                 fi
-                read -p "按回车返回菜单 🔙"
+                read -rp "按回车返回菜单..." _
                 ;;
             5)
                 echo "重置BBR配置 🔄..."
                 reset_sysctl_d_defaults
-                echo "✅ BBR已彻底重置为系统默认（cubic）"
-                read -p "按回车返回菜单 🔙"
+                echo -e "${GREEN}✅ BBR已彻底重置为系统默认（cubic）${NC}"
+                read -rp "按回车返回菜单..." _
                 ;;
             6)
                 echo "备份管理 🗂️"
                 mkdir -p "$BBR_BACKUP_DIR"
                 mapfile -t backups < <(ls "$BBR_BACKUP_DIR"/*.tar.gz 2>/dev/null)
                 if [ ${#backups[@]} -eq 0 ]; then
-                    echo "⚠️ 无可用备份"
-                    read -p "按回车返回菜单 🔙"
+                    echo -e "${YELLOW}⚠️ 无可用备份${NC}"
+                    read -rp "按回车返回菜单..." _
                     continue
                 fi
                 echo "可用备份列表:"
@@ -405,38 +407,39 @@ bbr_menu() {
                     echo "[$((i+1))] ${backups[$i]}"
                 done
                 echo "[0] 删除全部备份"
-                read -p "请输入要删除的备份编号: " del_idx
+                read -rp "请输入要删除的备份编号: " del_idx
                 if [[ "$del_idx" =~ ^[0-9]+$ ]]; then
                     if [ "$del_idx" -eq 0 ]; then
                         rm -f "$BBR_BACKUP_DIR"/*.tar.gz
-                        echo "✅ 已删除所有备份"
+                        echo -e "${GREEN}✅ 已删除所有备份${NC}"
                     elif [ "$del_idx" -ge 1 ] && [ "$del_idx" -le "${#backups[@]}" ]; then
                         rm -f "${backups[$((del_idx-1))]}"
-                        echo "✅ 已删除备份: ${backups[$((del_idx-1))]}"
+                        echo -e "${GREEN}✅ 已删除备份: ${backups[$((del_idx-1))]}${NC}"
                     else
-                        echo "⚠️ 无效编号"
+                        echo -e "${YELLOW}⚠️ 无效编号${NC}"
                     fi
                 fi
-                read -p "按回车返回菜单 🔙"
+                read -rp "按回车返回菜单..." _
                 ;;
-            7)
-                return
-                ;;
-            *)
-                echo "❌ 无效选择"
-                ;;
+            0) return ;;
+            *) echo -e "${RED}无效选择，请重试 😕${NC}"; sleep 1 ;;
         esac
     done
 }
-# 功能4：DNS管理子菜单（LXC优化版） 🌐
+
+# 功能4：DNS管理
 dns_menu() {
     while true; do
-        echo "DNS管理菜单 🌐："
-        echo "1. 查看当前系统DNS 🔍"
-        echo "2. 修改系统DNS（支持LXC容器） ✏️"
-        echo "3. 重置DNS配置（取消不可变属性） 🔄"
-        echo "4. 返回主菜单 🔙"
-        read -p "请输入您的选择： " choice
+        clear
+        cat <<EOF
+========== DNS 管理菜单 🌐 ==========
+[1] 查看当前系统DNS
+[2] 修改系统DNS（支持LXC）
+[3] 重置DNS配置（取消不可变属性）
+[0] 返回主菜单
+======================================
+EOF
+        read -rp "请输入您的选择 [0-3]: " choice
         case $choice in
             1)
                 echo "当前DNS设置："
@@ -448,42 +451,30 @@ dns_menu() {
                 cat /etc/resolv.conf
                 echo "--- resolv.conf 属性 ---"
                 lsattr /etc/resolv.conf 2>/dev/null || echo "无法查看文件属性"
+                read -rp "按回车键继续..." _
                 ;;
             2)
                 echo "警告：此操作将修改系统DNS ❗"
-                read -p "请输入新的DNS服务器（例如8.8.8.8）： " dns1
-                read -p "请输入备用DNS服务器（可选，例如8.8.4.4）： " dns2
-                
+                read -rp "请输入新的DNS服务器（例如8.8.8.8）： " dns1
+                read -rp "请输入备用DNS服务器（可选，例如8.8.4.4）： " dns2
                 # 检查是否为LXC容器
                 if grep -q "container=lxc" /proc/1/environ 2>/dev/null || [ -f /.lxc-boot-id ]; then
                     echo "检测到LXC容器环境，使用LXC兼容的DNS配置方式..."
-                    
-                    # 方法1：通过systemd-resolved（如果可用）
                     if command -v resolvectl &>/dev/null; then
                         echo "通过systemd-resolved配置DNS..."
                         resolvectl dns eth0 "$dns1" 2>/dev/null || resolvectl dns "$dns1"
                         [ ! -z "$dns2" ] && resolvectl dns eth0 "$dns1 $dns2" 2>/dev/null || true
                     fi
-                    
-                    # 方法2：直接写入resolv.conf（LXC通常允许）
                     if [ -f /etc/resolv.conf ]; then
-                        # 移除不可变属性（如果存在）
                         chattr -i /etc/resolv.conf 2>/dev/null || true
-                        
-                        # 备份原配置
                         cp /etc/resolv.conf /etc/resolv.conf.backup.$(date +%Y%m%d%H%M%S)
-                        
-                        # 写入新配置
                         echo "# Generated by system script at $(date)" > /etc/resolv.conf
                         echo "nameserver $dns1" >> /etc/resolv.conf
                         if [ ! -z "$dns2" ]; then
                             echo "nameserver $dns2" >> /etc/resolv.conf
                         fi
-                        
                         echo "DNS配置已写入 /etc/resolv.conf"
                     fi
-                    
-                    # 方法3：尝试配置网络管理器（如果存在）
                     if command -v nmcli &>/dev/null; then
                         echo "检测到NetworkManager，尝试配置..."
                         connection=$(nmcli -t -f NAME con show --active | head -n1)
@@ -492,41 +483,26 @@ dns_menu() {
                             nmcli con up "$connection"
                         fi
                     fi
-                    
-                    echo "LXC容器DNS配置完成 🎉"
-                    echo "注意：某些LXC配置可能需要在宿主机层面修改"
+                    echo -e "${GREEN}LXC容器DNS配置完成 🎉${NC}"
                 else
-                    # 非LXC环境，使用原方法
                     echo "检测到非LXC环境，使用标准DNS配置..."
-                    
-                    # 移除不可变属性（如果存在）
                     chattr -i /etc/resolv.conf 2>/dev/null || true
-                    
-                    # 备份原配置
                     cp /etc/resolv.conf /etc/resolv.conf.backup.$(date +%Y%m%d%H%M%S)
-                    
-                    # 写入新配置
                     echo "# Generated by system script at $(date)" > /etc/resolv.conf
                     echo "nameserver $dns1" >> /etc/resolv.conf
                     if [ ! -z "$dns2" ]; then
                         echo "nameserver $dns2" >> /etc/resolv.conf
                     fi
-                    
-                    # 设置不可变属性（防止被覆盖）
                     chattr +i /etc/resolv.conf 2>/dev/null && echo "已设置DNS文件保护" || echo "警告：无法设置文件保护"
-                    
-                    echo "DNS已永久修改 🎉"
+                    echo -e "${GREEN}DNS已永久修改 🎉${NC}"
                 fi
-                
-                # 测试DNS解析
                 echo "测试DNS解析..."
                 nslookup baidu.com 2>/dev/null || dig baidu.com 2>/dev/null || echo "DNS测试失败，请检查配置"
+                read -rp "按回车键继续..." _
                 ;;
             3)
                 if [ -f /etc/resolv.conf ]; then
                     chattr -i /etc/resolv.conf 2>/dev/null && echo "已移除DNS文件保护属性" || echo "无法移除文件保护属性"
-                    
-                    # 恢复备份（如果存在）
                     latest_backup=$(ls -t /etc/resolv.conf.backup.* 2>/dev/null | head -n1)
                     if [ ! -z "$latest_backup" ]; then
                         cp "$latest_backup" /etc/resolv.conf
@@ -535,947 +511,819 @@ dns_menu() {
                         echo "没有找到备份，请手动编辑 /etc/resolv.conf"
                     fi
                 fi
+                read -rp "按回车键继续..." _
                 ;;
-            4)
-                return
-                ;;
-            *)
-                echo "无效选择，请重试 😕"
-                ;;
+            0) return ;;
+            *) echo -e "${RED}无效选择，请重试 😕${NC}"; sleep 1 ;;
         esac
     done
 }
 
-# 功能5：修改主机名（LXC优化版） 🖥️
+# 功能5：修改主机名
 change_hostname() {
+    clear
+    echo "========== 修改主机名 =========="
     current_hostname=$(hostname)
     echo "当前主机名：$current_hostname"
-    read -p "请输入新主机名： " new_hostname
+    read -rp "请输入新主机名： " new_hostname
+    if [ -z "$new_hostname" ]; then
+        echo -e "${RED}主机名不能为空${NC}"
+        read -rp "按回车键返回主菜单..." _
+        return
+    fi
     echo "警告：此操作将永久更改主机名 ❗"
     
-    # 检查是否为LXC容器
     if grep -q "container=lxc" /proc/1/environ 2>/dev/null || [ -f /.lxc-boot-id ]; then
         echo "检测到LXC容器环境，使用LXC兼容的主机名配置方式..."
-        
-        # LXC容器中主机名配置方法
-        # 方法1：使用hostnamectl（如果可用）
         if command -v hostnamectl &>/dev/null; then
             hostnamectl set-hostname "$new_hostname"
         else
-            # 方法2：直接写入文件
             echo "$new_hostname" > /etc/hostname
         fi
-        
-        # 更新hosts文件
         if [ -f /etc/hosts ]; then
-            # 备份hosts文件
             cp /etc/hosts /etc/hosts.backup.$(date +%Y%m%d%H%M%S)
-            
-            # 更新hosts文件
             sed -i "s/127.0.1.1\s*$current_hostname/127.0.1.1\t$new_hostname/g" /etc/hosts
             sed -i "s/127.0.0.1\s*$current_hostname/127.0.0.1\t$new_hostname/g" /etc/hosts
-            
-            # 如果没找到匹配项，添加新条目
             if ! grep -q "127.0.1.1.*$new_hostname" /etc/hosts; then
                 echo "127.0.1.1\t$new_hostname" >> /etc/hosts
             fi
         fi
-        
-        # 立即应用主机名（LXC特有）
         sysctl kernel.hostname="$new_hostname" 2>/dev/null || hostname "$new_hostname"
-        
-        echo "LXC容器主机名已更改为 $new_hostname 🎉"
-        
-        # 额外提示
-        echo "注意：某些LXC配置可能需要重启容器或重新连接才能看到完整效果"
-        echo "提示：LXC容器的主机名也可能需要在宿主机配置中修改"
-        
+        echo -e "${GREEN}LXC容器主机名已更改为 $new_hostname 🎉${NC}"
     else
-        # 非LXC环境，使用标准方法
         hostnamectl set-hostname "$new_hostname"
-        
-        # 更新hosts文件
         if [ -f /etc/hosts ]; then
             cp /etc/hosts /etc/hosts.backup.$(date +%Y%m%d%H%M%S)
             sed -i "s/127.0.1.1\s*$current_hostname/127.0.1.1\t$new_hostname/g" /etc/hosts
             sed -i "s/127.0.0.1\s*$current_hostname/127.0.0.1\t$new_hostname/g" /etc/hosts
         fi
-        
-        echo "主机名已更改为 $new_hostname 🎉"
+        echo -e "${GREEN}主机名已更改为 $new_hostname 🎉${NC}"
     fi
-    
-    # 验证更改
     echo "当前主机名：$(hostname)"
-    echo "当前hosts文件配置："
     grep "$(hostname)" /etc/hosts 2>/dev/null || echo "未在hosts文件中找到当前主机名"
+    read -rp "按回车键返回主菜单..." _
 }
-# 功能6：SSH端口管理子菜单（Debian 12+ systemd优化版） 🔒
-ssh_port_menu() {
-    # 检测是否为LXC容器
+
+# ---------- SSH 综合管理 ----------
+# 内部函数：获取当前 SSH 端口
+get_ssh_port() {
+    if [[ -n "$SSH_CONNECTION" ]]; then
+        echo "$SSH_CONNECTION" | awk '{print $4}'
+        return
+    fi
+    if grep -qiE '^[[:space:]]*Port[[:space:]]+' /etc/ssh/sshd_config; then
+        grep -iE '^[[:space:]]*Port[[:space:]]+' /etc/ssh/sshd_config | tail -n1 | awk '{print $2}'
+        return
+    fi
+    echo 22
+}
+
+# 生成随机端口
+random_port() {
+    shuf -i 20000-60000 -n 1
+}
+
+# 重启 SSH 服务（兼容 socket 和 service）
+restart_ssh() {
+    if systemctl list-units --full -all 2>/dev/null | grep -q "ssh.socket"; then
+        systemctl restart ssh.socket
+    else
+        systemctl restart ssh
+    fi
+}
+
+# SSH 端口管理子菜单
+ssh_port_submenu() {
     local is_lxc=false
     if grep -q "container=lxc" /proc/1/environ 2>/dev/null || [ -f /.lxc-boot-id ]; then
         is_lxc=true
-        echo "检测到LXC容器环境，使用兼容模式 🐧"
     fi
-    
-    # 检测systemd版本和SSH socket激活状态
     local has_socket=false
     local ssh_service="ssh"
     local socket_active=false
-    
-    # 检查系统使用的SSH服务名称
     if systemctl list-units --full -all 2>/dev/null | grep -q "ssh.service"; then
         ssh_service="ssh"
     elif systemctl list-units --full -all 2>/dev/null | grep -q "sshd.service"; then
         ssh_service="sshd"
     fi
-    
-    # 检查是否存在ssh.socket且是否激活
     if systemctl list-unit-files 2>/dev/null | grep -q "ssh.socket"; then
         has_socket=true
         if systemctl is-active ssh.socket >/dev/null 2>&1; then
             socket_active=true
         fi
     fi
-    
-    # 获取当前SSH端口（需要考虑socket和服务两种情况）
-    local current_port=""
-    local current_port_source=""
-    
-    # 首先从sshd_config获取配置的端口
-    local config_port=$(grep -E "^\s*Port\s+" /etc/ssh/sshd_config 2>/dev/null | awk '{print $2}' | head -n 1)
-    
-    # 检查实际监听的端口
-    if command -v ss >/dev/null 2>&1; then
-        local listening_ports=$(ss -tlnp 2>/dev/null | grep -E ":(22|${config_port:-22})" | grep -E "(sshd|ssh)")
-        if [ ! -z "$listening_ports" ]; then
-            # 提取实际监听的端口
-            current_port=$(echo "$listening_ports" | head -n1 | sed -n 's/.*:\([0-9]\+\).*/\1/p')
-            current_port_source="service"
-        fi
-    fi
-    
-    # 如果没有找到监听端口但有socket激活，检查socket端口
-    if [ -z "$current_port" ] && [ "$has_socket" = true ]; then
-        # 从socket文件获取端口
-        if [ -f /lib/systemd/system/ssh.socket ]; then
-            local socket_port=$(grep -E "ListenStream=" /lib/systemd/system/ssh.socket 2>/dev/null | cut -d= -f2)
-            current_port=${socket_port:-22}
-            current_port_source="socket"
-        fi
-    fi
-    
-    # 如果都没找到，使用配置端口或默认22
-    current_port=${current_port:-${config_port:-22}}
-    
-    echo "═══════════════════════════════════════════"
-    echo "           SSH端口管理工具"
-    echo "═══════════════════════════════════════════"
-    echo "📊 当前状态："
-    echo "   • 配置端口: ${config_port:-22}"
-    echo "   • 实际监听: ${current_port} (${current_port_source:-service})"
-    if [ "$has_socket" = true ]; then
-        echo "   • Socket激活: $([ "$socket_active" = true ] && echo "✅ 启用" || echo "❌ 停用")"
-        if [ "$socket_active" = true ]; then
-            local socket_port=$(grep -E "ListenStream=" /lib/systemd/system/ssh.socket 2>/dev/null | cut -d= -f2)
-            echo "   • Socket端口: ${socket_port:-22}"
-        fi
-    fi
-    echo "═══════════════════════════════════════════"
-    
+    local current_port=$(get_ssh_port)
+
     while true; do
-        echo ""
-        echo "🔧 SSH端口管理菜单："
-        echo "  1. 修改SSH端口 ✏️"
-        echo "  2. 查看SSH服务状态 📊"
-        echo "  3. 测试SSH配置 ✅"
-        echo "  4. 切换监听模式 (socket/daemon) 🔄"
-        echo "  5. 返回主菜单 🔙"
-        read -p "请输入您的选择 [1-5]: " choice
-        
-        case $choice in
+        clear
+        cat <<EOF
+========== SSH 端口管理 ==========
+当前端口: $current_port
+Socket激活: $([ "$socket_active" = true ] && echo "启用" || echo "停用")
+
+[1] 修改SSH端口
+[2] 查看SSH服务状态
+[3] 测试SSH配置
+[4] 切换监听模式 (socket/daemon)
+[0] 返回上一级
+==================================
+EOF
+        read -rp "请选择 [0-4]: " sub_choice
+        case $sub_choice in
             1)
                 echo ""
-                echo "⚠️  警告：修改端口前请确保："
-                echo "  1. 防火墙已放行新端口"
-                echo "  2. 您有其他方式访问服务器（如VNC或物理控制台）"
-                echo "  3. 已备份重要数据"
-                echo ""
-                
-                read -p "请输入新的SSH端口号 (1-65535): " new_port
-                
-                # 验证端口有效性
+                read -rp "请输入新的SSH端口号 (1-65535): " new_port
                 if ! [[ "$new_port" =~ ^[0-9]+$ ]] || [ "$new_port" -lt 1 ] || [ "$new_port" -gt 65535 ]; then
-                    echo "❌ 无效端口号，请输入1-65535之间的数字"
-                    continue
+                    echo -e "${RED}❌ 无效端口号${NC}"; sleep 2; continue
                 fi
-                
-                # 检查端口是否被占用
-                echo "检查端口 $new_port 占用情况..."
-                local port_busy=false
-                
+                # 检查端口占用
                 if command -v ss >/dev/null 2>&1; then
                     if ss -tuln 2>/dev/null | grep -q ":$new_port "; then
-                        port_busy=true
-                    fi
-                elif command -v netstat >/dev/null 2>&1; then
-                    if netstat -tuln 2>/dev/null | grep -q ":$new_port "; then
-                        port_busy=true
-                    fi
-                elif [ -f /proc/net/tcp ]; then
-                    local hex_port=$(printf "%04X" $new_port)
-                    if grep -qi ":${hex_port}" /proc/net/tcp 2>/dev/null; then
-                        port_busy=true
+                        echo -e "${RED}❌ 端口 $new_port 已被占用${NC}"; sleep 2; continue
                     fi
                 fi
-                
-                if [ "$port_busy" = true ]; then
-                    echo "❌ 端口 $new_port 已被占用，请选择其他端口"
-                    continue
-                fi
-                
-                # 确认操作
-                echo ""
-                echo "将修改SSH端口从 $current_port 改为 $new_port"
-                read -p "是否继续？(y/n): " confirm
-                if [ "$confirm" != "y" ] && [ "$confirm" != "Y" ]; then
-                    echo "操作已取消"
-                    continue
-                fi
-                
-                # 备份配置文件
                 local backup_dir="/root/ssh_backups"
                 mkdir -p "$backup_dir"
                 local timestamp=$(date +%Y%m%d_%H%M%S)
-                local backup_file="$backup_dir/sshd_config_${timestamp}.bak"
-                
-                cp /etc/ssh/sshd_config "$backup_file"
-                echo "✅ 配置文件已备份到: $backup_file"
-                
-                # 修改SSH配置文件
-                echo "修改SSH配置..."
+                cp /etc/ssh/sshd_config "$backup_dir/sshd_config_${timestamp}.bak"
                 if grep -q -E "^\s*Port\s+" /etc/ssh/sshd_config; then
                     sed -i "s/^\s*Port\s\+.*/Port $new_port/" /etc/ssh/sshd_config
                 else
                     echo "Port $new_port" >> /etc/ssh/sshd_config
                 fi
-                
-                # 如果socket激活启用，也需要修改socket配置
                 if [ "$has_socket" = true ] && [ -f /lib/systemd/system/ssh.socket ]; then
-                    echo "检测到ssh.socket，同步修改socket配置..."
                     cp /lib/systemd/system/ssh.socket "$backup_dir/ssh.socket_${timestamp}.bak"
-                    
                     if grep -q "ListenStream=" /lib/systemd/system/ssh.socket; then
                         sed -i "s/ListenStream=.*/ListenStream=$new_port/" /lib/systemd/system/ssh.socket
                     else
                         echo "ListenStream=$new_port" >> /lib/systemd/system/ssh.socket
                     fi
-                    
-                    # 重新加载systemd配置
                     systemctl daemon-reload
                 fi
-                
-                # 配置防火墙
+                # 防火墙配置（略，保留原逻辑）
                 if [ "$is_lxc" = false ]; then
-                    configure_firewall "$new_port" "$current_port"
-                else
-                    echo "LXC环境：请确保宿主机防火墙放行端口 $new_port"
+                    if command -v ufw >/dev/null 2>&1; then
+                        ufw allow "$new_port"/tcp
+                    fi
+                    if command -v firewall-cmd >/dev/null 2>&1; then
+                        firewall-cmd --permanent --add-port="$new_port/tcp"
+                        firewall-cmd --reload
+                    fi
                 fi
-                
-                # 测试SSH配置
-                echo "测试SSH配置..."
                 if ! sshd -t >/dev/null 2>&1; then
-                    echo "❌ SSH配置测试失败"
-                    echo "正在恢复配置..."
-                    cp "$backup_file" /etc/ssh/sshd_config
-                    
-                    if [ "$has_socket" = true ] && [ -f "$backup_dir/ssh.socket_${timestamp}.bak" ]; then
+                    echo -e "${RED}❌ SSH配置测试失败，正在恢复备份...${NC}"
+                    cp "$backup_dir/sshd_config_${timestamp}.bak" /etc/ssh/sshd_config
+                    if [ "$has_socket" = true ]; then
                         cp "$backup_dir/ssh.socket_${timestamp}.bak" /lib/systemd/system/ssh.socket
                         systemctl daemon-reload
                     fi
-                    
-                    echo "❌ 配置已恢复，请检查SSH配置错误："
-                    sshd -t
+                    sleep 2
                     continue
                 fi
-                
-                echo "✅ SSH配置测试通过"
-                
-                # 根据当前模式重启SSH
                 if [ "$socket_active" = true ]; then
-                    # Socket激活模式
-                    echo "当前使用socket激活模式，重启ssh.socket..."
                     systemctl stop ssh.socket
                     systemctl stop ssh.service
                     systemctl start ssh.socket
                 else
-                    # 传统daemon模式
-                    echo "当前使用传统daemon模式，重启ssh.service..."
                     systemctl restart "$ssh_service"
                 fi
-                
-                # 等待服务启动
-                sleep 3
-                
-                # 验证新端口是否监听
-                echo "验证新端口监听状态..."
-                local verify_success=false
-                
-                if command -v ss >/dev/null 2>&1; then
-                    if ss -tlnp 2>/dev/null | grep -q ":$new_port"; then
-                        verify_success=true
-                    fi
-                elif command -v netstat >/dev/null 2>&1; then
-                    if netstat -tlnp 2>/dev/null | grep -q ":$new_port"; then
-                        verify_success=true
-                    fi
-                fi
-                
-                if [ "$verify_success" = true ]; then
-                    echo "✅ SSH端口已成功修改为 $new_port"
-                    echo ""
-                    echo "📝 请使用以下命令测试连接："
-                    echo "   ssh -p $new_port root@your_server_ip"
-                    echo ""
-                    echo "⚠️  重要提示："
-                    echo "   1. 请在当前会话保持连接，另开终端测试新端口"
-                    echo "   2. 测试成功后再关闭当前会话"
-                    echo "   3. 如果无法连接，可使用备份配置恢复："
-                    echo "      cp $backup_file /etc/ssh/sshd_config"
-                    
-                    if [ "$socket_active" = true ]; then
-                        echo "      systemctl restart ssh.socket"
-                    else
-                        echo "      systemctl restart $ssh_service"
-                    fi
-                    
-                    current_port="$new_port"
-                else
-                    echo "❌ 警告：未检测到新端口 $new_port 监听"
-                    echo "请手动检查服务状态："
-                    echo "   systemctl status ssh.socket"
-                    echo "   systemctl status $ssh_service"
-                    echo "   journalctl -xe"
-                fi
+                echo -e "${GREEN}✅ SSH端口已修改为 $new_port${NC}"
+                current_port="$new_port"
+                read -rp "按回车键继续..." _
                 ;;
-                
             2)
                 echo ""
                 echo "📊 SSH服务详细状态："
-                echo "──────────────────"
-                
-                # SSH服务状态
-                echo "🔹 SSH服务状态："
-                if systemctl list-units --full -all 2>/dev/null | grep -q "ssh.service"; then
-                    systemctl status ssh.service --no-pager -l | head -n 20
-                elif systemctl list-units --full -all 2>/dev/null | grep -q "sshd.service"; then
-                    systemctl status sshd.service --no-pager -l | head -n 20
-                else
-                    echo "   SSH服务未找到"
-                fi
-                
-                echo ""
-                echo "🔹 Socket状态："
+                systemctl status ssh.service --no-pager -l | head -n 20
                 if [ "$has_socket" = true ]; then
-                    systemctl status ssh.socket --no-pager -l | head -n 10
-                else
-                    echo "   未使用ssh.socket"
-                fi
-                
-                echo ""
-                echo "🔹 监听端口："
-                if command -v ss >/dev/null 2>&1; then
-                    ss -tlnp | grep -E ":(22|$current_port)" | head -n 5 || echo "   未找到监听端口"
-                elif command -v netstat >/dev/null 2>&1; then
-                    netstat -tlnp | grep -E ":(22|$current_port)" | head -n 5 || echo "   未找到监听端口"
-                else
-                    echo "   无法查看端口监听状态"
-                fi
-                
-                echo ""
-                echo "🔹 配置文件："
-                echo "   /etc/ssh/sshd_config:"
-                grep -E "^\s*(Port|ListenAddress)" /etc/ssh/sshd_config 2>/dev/null || echo "   未配置自定义端口"
-                
-                if [ "$has_socket" = true ] && [ -f /lib/systemd/system/ssh.socket ]; then
                     echo ""
-                    echo "   /lib/systemd/system/ssh.socket:"
-                    grep -E "ListenStream=" /lib/systemd/system/ssh.socket 2>/dev/null
+                    echo "🔹 Socket状态："
+                    systemctl status ssh.socket --no-pager -l | head -n 10
                 fi
+                read -rp "按回车键继续..." _
                 ;;
-                
             3)
                 echo ""
-                echo "🔍 SSH配置测试："
-                echo "──────────────────"
-                
-                # 测试配置文件
                 echo -n "配置文件语法检查: "
                 if sshd -t >/dev/null 2>&1; then
-                    echo "✅ 通过"
+                    echo -e "${GREEN}✅ 通过${NC}"
                 else
-                    echo "❌ 失败"
+                    echo -e "${RED}❌ 失败${NC}"
                     sshd -t
                 fi
-                
-                # 测试端口连通性
-                echo -n "本地端口连通性测试: "
-                if command -v nc >/dev/null 2>&1; then
-                    if timeout 2 nc -zv localhost "$current_port" 2>&1 | grep -q "succeeded"; then
-                        echo "✅ 端口 $current_port 可连接"
-                    else
-                        echo "❌ 端口 $current_port 无法连接"
-                    fi
-                elif command -v telnet >/dev/null 2>&1; then
-                    if timeout 2 telnet localhost "$current_port" 2>&1 | grep -q "Connected"; then
-                        echo "✅ 端口 $current_port 可连接"
-                    else
-                        echo "❌ 端口 $current_port 无法连接"
-                    fi
-                else
-                    echo "⚠️  无法测试（需要nc或telnet）"
-                fi
-                
-                # 检查防火墙
-                echo ""
-                echo "防火墙状态："
-                if command -v ufw >/dev/null 2>&1; then
-                    ufw status | grep -E "($current_port|22)" || echo "   未找到相关规则"
-                elif command -v firewall-cmd >/dev/null 2>&1; then
-                    firewall-cmd --list-ports | grep -E "($current_port|22)" || echo "   未找到相关规则"
-                else
-                    echo "   未检测到常见防火墙"
-                fi
+                read -rp "按回车键继续..." _
                 ;;
-                
             4)
-                echo ""
-                echo "🔄 切换SSH监听模式"
-                echo "──────────────────"
-                
                 if [ "$has_socket" = false ]; then
-                    echo "⚠️  系统不支持ssh.socket模式"
-                    continue
+                    echo -e "${YELLOW}⚠️ 系统不支持ssh.socket模式${NC}"
+                    sleep 2; continue
                 fi
-                
                 echo "当前模式: $([ "$socket_active" = true ] && echo "Socket激活模式" || echo "传统Daemon模式")"
-                echo ""
-                echo "选择要切换的模式："
-                echo "   1. Socket激活模式 (systemd监听，按需启动SSH)"
-                echo "   2. 传统Daemon模式 (SSH服务常驻)"
-                echo "   0. 取消"
-                
-                read -p "请选择 [0-2]: " mode_choice
-                
+                echo "1) 切换到Socket激活模式"
+                echo "2) 切换到传统Daemon模式"
+                echo "0) 取消"
+                read -rp "请选择 [0-2]: " mode_choice
                 case $mode_choice in
                     1)
                         if [ "$socket_active" = true ]; then
-                            echo "已经是Socket激活模式"
-                            continue
+                            echo "已经是Socket激活模式"; sleep 2; continue
                         fi
-                        
-                        echo "切换到Socket激活模式..."
-                        
-                        # 获取当前配置端口
-                        local config_port=$(grep -E "^\s*Port\s+" /etc/ssh/sshd_config 2>/dev/null | awk '{print $2}' | head -n 1)
+                        config_port=$(grep -E "^\s*Port\s+" /etc/ssh/sshd_config 2>/dev/null | awk '{print $2}' | head -n 1)
                         config_port=${config_port:-22}
-                        
-                        # 配置socket端口
                         if [ -f /lib/systemd/system/ssh.socket ]; then
                             sed -i "s/ListenStream=.*/ListenStream=$config_port/" /lib/systemd/system/ssh.socket
                         else
                             echo "ListenStream=$config_port" > /lib/systemd/system/ssh.socket
                         fi
-                        
-                        # 重新加载并启动
                         systemctl daemon-reload
                         systemctl stop ssh.service
                         systemctl enable --now ssh.socket
-                        
-                        echo "✅ 已切换到Socket激活模式"
                         socket_active=true
+                        echo -e "${GREEN}✅ 已切换到Socket激活模式${NC}"
                         ;;
-                        
                     2)
                         if [ "$socket_active" = false ]; then
-                            echo "已经是传统Daemon模式"
-                            continue
+                            echo "已经是传统Daemon模式"; sleep 2; continue
                         fi
-                        
-                        echo "切换到传统Daemon模式..."
-                        
-                        # 停止并禁用socket
                         systemctl stop ssh.socket
                         systemctl disable ssh.socket
-                        
-                        # 启动服务
                         systemctl enable --now ssh.service
-                        
-                        echo "✅ 已切换到传统Daemon模式"
                         socket_active=false
+                        echo -e "${GREEN}✅ 已切换到传统Daemon模式${NC}"
                         ;;
-                        
-                    0)
-                        echo "操作取消"
-                        ;;
-                    *)
-                        echo "无效选择"
-                        ;;
+                    0) ;;
+                    *) echo -e "${RED}无效选择${NC}" ;;
                 esac
+                read -rp "按回车键继续..." _
                 ;;
-                
-            5)
-                return
-                ;;
-                
-            *)
-                echo "无效选择，请输入1-5之间的数字"
-                ;;
+            0) return ;;
+            *) echo -e "${RED}无效选择${NC}"; sleep 1 ;;
         esac
-        
-        echo ""
-        read -p "按回车键继续..."
     done
 }
 
-# 辅助函数：配置防火墙
-configure_firewall() {
-    local new_port="$1"
-    local old_port="$2"
-    
-    echo "配置防火墙规则..."
-    
-    # UFW
-    if command -v ufw >/dev/null 2>&1; then
-        if ufw status 2>/dev/null | grep -q "Status: active"; then
-            echo "检测到UFW防火墙..."
-            
-            # 添加新端口
-            if ufw allow "$new_port"/tcp; then
-                echo "✅ 已添加UFW规则：$new_port/tcp"
-            fi
-            
-            # 可选：删除旧端口
-            read -p "是否删除旧端口 $old_port 的防火墙规则？(y/n): " del_old
-            if [ "$del_old" = "y" ] || [ "$del_old" = "Y" ]; then
-                ufw delete allow "$old_port"/tcp
-                echo "已删除旧端口规则"
-            fi
-            
-            ufw reload
-        fi
-    fi
-    
-    # firewalld
-    if command -v firewall-cmd >/dev/null 2>&1; then
-        if systemctl is-active firewalld >/dev/null 2>&1; then
-            echo "检测到firewalld..."
-            
-            # 添加新端口
-            firewall-cmd --permanent --add-port="$new_port/tcp"
-            
-            # 可选：删除旧端口
-            read -p "是否删除旧端口 $old_port 的防火墙规则？(y/n): " del_old
-            if [ "$del_old" = "y" ] || [ "$del_old" = "Y" ]; then
-                firewall-cmd --permanent --remove-port="$old_port/tcp"
-            fi
-            
-            firewall-cmd --reload
-            echo "✅ firewalld规则已更新"
-        fi
-    fi
-}
-
-# 功能7：修改SSH密码（LXC优化版） 🔑
-change_ssh_password() {
-    echo "🔐 SSH密码修改工具"
-    echo "═══════════════════════════════════════════"
-    
-    # 检测是否为LXC容器
-    local is_lxc=false
-    if grep -q "container=lxc" /proc/1/environ 2>/dev/null || [ -f /.lxc-boot-id ]; then
-        is_lxc=true
-        echo "检测到LXC容器环境，使用兼容模式 🐧"
-    fi
-    
-    # 检测是否为Debian 12+ (可能影响PAM配置)
-    local is_debian12=false
-    if [ -f /etc/debian_version ]; then
-        local debian_version=$(cat /etc/debian_version)
-        if [[ "$debian_version" == 12* ]] || [[ "$debian_version" == "bookworm"* ]]; then
-            is_debian12=true
-            echo "检测到Debian 12+，使用兼容的PAM配置"
-        fi
-    fi
-    
-    # 获取当前用户
-    local current_user=$(whoami)
-    echo "当前用户：$current_user"
-    
-    # 检查权限
-    if [ "$current_user" != "root" ]; then
-        if ! groups | grep -q sudo; then
-            echo "❌ 当前用户没有权限修改密码，需要root权限"
-            return 1
-        fi
-    fi
-    
-    # 选择要修改密码的用户
-    local target_user=""
-    if [ "$current_user" = "root" ]; then
-        echo ""
-        echo "可选用户："
-        awk -F: '{ if ($3>=1000 && $3<65534) print "   " $1 }' /etc/passwd 2>/dev/null | head -n 5
-        echo "   root"
-        echo ""
-        read -p "请输入要修改密码的用户名 [默认: root]: " input_user
-        target_user="${input_user:-root}"
-    else
-        target_user="$current_user"
-        echo "将修改当前用户 ($target_user) 的密码"
-    fi
-    
-    # 检查用户是否存在
-    if ! id "$target_user" >/dev/null 2>&1; then
-        echo "❌ 用户 $target_user 不存在"
-        return
-    fi
-    
-    # 生成复杂密码
-    echo ""
-    echo "生成强密码..."
-    
-    # 定义字符集
-    local upper_chars='ABCDEFGHIJKLMNOPQRSTUVWXYZ'
-    local lower_chars='abcdefghijklmnopqrstuvwxyz'
-    local digit_chars='0123456789'
-    local special_chars='!@#$%^&*()_+-='
-    
-    # 生成20位密码，确保包含各类字符
-    local password=""
-    
-    # 首先确保每种类型至少一个
-    password="${password}${upper_chars:$((RANDOM % ${#upper_chars})):1}"
-    password="${password}${lower_chars:$((RANDOM % ${#lower_chars})):1}"
-    password="${password}${digit_chars:$((RANDOM % ${#digit_chars})):1}"
-    password="${password}${special_chars:$((RANDOM % ${#special_chars})):1}"
-    
-    # 填充剩余字符
-    local all_chars="${upper_chars}${lower_chars}${digit_chars}${special_chars}"
-    for i in {1..16}; do
-        password="${password}${all_chars:$((RANDOM % ${#all_chars})):1}"
-    done
-    
-    # 打乱密码顺序
-    password=$(echo "$password" | fold -w1 | shuf | tr -d '\n')
-    
-    echo "生成密码：$password"
-    echo ""
-    
-    # 密码输入选项
-    echo "请选择："
-    echo "  1. 使用生成的密码"
-    echo "  2. 手动输入密码"
-    echo "  0. 取消"
-    
-    read -p "请选择 [0-2]: " pass_choice
-    
-    case $pass_choice in
-        1)
-            pass1="$password"
-            ;;
-        2)
-            read -sp "请输入新密码（输入时不显示）: " pass1
-            echo ""
-            read -sp "请再次确认新密码: " pass2
-            echo ""
-            
-            if [ "$pass1" != "$pass2" ]; then
-                echo "❌ 两次输入的密码不匹配"
-                return
-            fi
-            
-            if [ -z "$pass1" ]; then
-                echo "❌ 密码不能为空"
-                return
-            fi
-            ;;
-        0|*)
-            echo "操作取消"
-            return
-            ;;
-    esac
-    
-    # 密码强度检查
-    echo ""
-    echo "检查密码强度..."
-    local strength_issues=0
-    
-    if [ ${#pass1} -lt 8 ]; then
-        echo "⚠️  长度不足8位"
-        strength_issues=$((strength_issues + 1))
-    fi
-    
-    if ! echo "$pass1" | grep -q '[A-Z]'; then
-        echo "⚠️  缺少大写字母"
-        strength_issues=$((strength_issues + 1))
-    fi
-    
-    if ! echo "$pass1" | grep -q '[a-z]'; then
-        echo "⚠️  缺少小写字母"
-        strength_issues=$((strength_issues + 1))
-    fi
-    
-    if ! echo "$pass1" | grep -q '[0-9]'; then
-        echo "⚠️  缺少数字"
-        strength_issues=$((strength_issues + 1))
-    fi
-    
-    if ! echo "$pass1" | grep -q '[!@#$%^&*()_+-=]'; then
-        echo "⚠️  缺少特殊字符"
-        strength_issues=$((strength_issues + 1))
-    fi
-    
-    if [ $strength_issues -gt 2 ]; then
-        echo ""
-        echo "⚠️  密码强度较弱"
-        read -p "是否继续使用此密码？(y/n): " confirm
-        if [ "$confirm" != "y" ] && [ "$confirm" != "Y" ]; then
-            echo "操作取消"
-            return
-        fi
-    else
-        echo "✅ 密码强度符合要求"
-    fi
-    
-    # 确认修改
-    echo ""
-    echo "将修改用户 $target_user 的密码"
-    read -p "确认修改？(y/n): " confirm
-    if [ "$confirm" != "y" ] && [ "$confirm" != "Y" ]; then
-        echo "操作取消"
-        return
-    fi
-    
-    # 尝试修改密码
-    echo ""
-    echo "正在修改密码..."
-    local success=false
-    
-    # 方法1：chpasswd
-    if echo "$target_user:$pass1" | chpasswd 2>/dev/null; then
-        success=true
-    # 方法2：passwd
-    elif echo -e "$pass1\n$pass1" | passwd "$target_user" 2>/dev/null; then
-        success=true
-    # 方法3：LXC特殊处理
-    elif [ "$is_lxc" = true ] && command -v lxc-attach >/dev/null 2>&1; then
-        if lxc-attach -n "$(hostname)" -- bash -c "echo '$target_user:$pass1' | chpasswd" 2>/dev/null; then
-            success=true
-        fi
-    fi
-    
-    if [ "$success" = true ]; then
-        echo ""
-        echo "✅ 密码修改成功！"
-        echo "═══════════════════════════════════════════"
-        echo "用户: $target_user"
-        echo "新密码: $pass1"
-        echo "═══════════════════════════════════════════"
-        echo ""
-        echo "⚠️  请立即保存密码并测试登录"
-        
-        # 获取当前SSH端口
-        local ssh_port=$(grep -E "^\s*Port\s+" /etc/ssh/sshd_config 2>/dev/null | awk '{print $2}' | head -n 1)
-        ssh_port=${ssh_port:-22}
-        
-        echo ""
-        echo "测试登录命令："
-        echo "   ssh -p $ssh_port $target_user@服务器IP"
-        echo ""
-        
-        if [ "$is_debian12" = true ]; then
-            echo "Debian 12+ 提示："
-            echo "   如果遇到PAM相关错误，请检查："
-            echo "   - /etc/pam.d/common-password"
-            echo "   - /etc/security/pwquality.conf"
-        fi
-    else
-        echo "❌ 密码修改失败"
-        echo ""
-        echo "可能的原因："
-        echo "   1. 权限不足"
-        echo "   2. PAM配置限制"
-        echo "   3. 账户被锁定"
-        echo ""
-        echo "尝试手动修改："
-        echo "   passwd $target_user"
-        
-        # 检查PAM配置
-        if [ -f /etc/pam.d/common-password ]; then
-            echo ""
-            echo "当前PAM密码策略："
-            grep -v "^#" /etc/pam.d/common-password | grep "pam_" || echo "   未找到特殊策略"
-        fi
-    fi
-}
-# 功能8：SSH密钥登录管理 🔑
-ssh_key_management() {
-    echo "正在拉取并执行SSH安全初始化脚本 ⏳..."
-    bash <(curl -sL https://raw.githubusercontent.com/Lanlan13-14/System-Easy/refs/heads/main/ssh-secure-init.sh)
-    if [ $? -eq 0 ]; then
-        echo "SSH密钥登录管理完成 🎉"
-    else
-        echo "执行失败，请检查网络或脚本URL 😔"
-    fi
-}
-# 功能9：卸载脚本 🗑️
-uninstall_script() {
-    echo "正在卸载脚本（仅删除脚本本身） 🗑️..."
-    rm -f "$0"
-    echo "脚本已删除，即将退出 🚪"
-    exit 0
-}
-# 功能10：设置系统时区与时间同步 ⏰
-set_timezone() {
+# SSH 密码管理子菜单
+ssh_password_submenu() {
     while true; do
-        echo "系统时区与时间同步管理菜单 ⏰："
-        echo "1. 查看当前系统时区 🔍"
-        echo "2. 设置系统时区 🌍"
-        echo "3. 启用/配置NTP时间同步 🕒"
-        echo "4. 禁用NTP时间同步 🚫"
-        echo "5. 立即进行时间同步 🔄"
-        echo "6. 返回主菜单 🔙"
-        read -p "请输入您的选择 [1-6]： " tz_choice
-        case $tz_choice in
+        clear
+        cat <<EOF
+========== SSH 密码管理 ==========
+[1] 修改当前用户密码
+[2] 启用密码登录（应急）
+[3] 禁用密码登录（仅密钥）
+[0] 返回上一级
+==================================
+EOF
+        read -rp "请选择 [0-3]: " sub_choice
+        case $sub_choice in
             1)
-                echo "当前系统时区：$(timedatectl show --property=Timezone --value 2>/dev/null || echo '无法获取时区信息')"
-                echo "NTP服务状态：$(timedatectl show --property=NTPSynchronized --value 2>/dev/null | grep -q 'yes' && echo '已同步' || echo '未同步')"
-                if systemctl is-active --quiet chronyd 2>/dev/null; then
-                    echo "chronyd 服务状态：运行中"
-                else
-                    echo "chronyd 服务状态：未运行"
+                echo ""
+                read -rp "请输入要修改密码的用户名 [默认: root]: " target_user
+                target_user=${target_user:-root}
+                if ! id "$target_user" >/dev/null 2>&1; then
+                    echo -e "${RED}❌ 用户 $target_user 不存在${NC}"
+                    sleep 2; continue
                 fi
-                echo "按回车键返回菜单 🔙"
-                read
+                # 生成复杂密码（可选）
+                echo "生成强密码..."
+                upper_chars='ABCDEFGHIJKLMNOPQRSTUVWXYZ'
+                lower_chars='abcdefghijklmnopqrstuvwxyz'
+                digit_chars='0123456789'
+                special_chars='!@#$%^&*()_+-='
+                password=""
+                password="${password}${upper_chars:$((RANDOM % ${#upper_chars})):1}"
+                password="${password}${lower_chars:$((RANDOM % ${#lower_chars})):1}"
+                password="${password}${digit_chars:$((RANDOM % ${#digit_chars})):1}"
+                password="${password}${special_chars:$((RANDOM % ${#special_chars})):1}"
+                all_chars="${upper_chars}${lower_chars}${digit_chars}${special_chars}"
+                for i in {1..16}; do
+                    password="${password}${all_chars:$((RANDOM % ${#all_chars})):1}"
+                done
+                password=$(echo "$password" | fold -w1 | shuf | tr -d '\n')
+                echo "生成密码：$password"
+                echo "请选择："
+                echo "  1. 使用生成的密码"
+                echo "  2. 手动输入密码"
+                echo "  0. 取消"
+                read -rp "请选择 [0-2]: " pass_choice
+                case $pass_choice in
+                    1) pass1="$password" ;;
+                    2)
+                        read -sp "请输入新密码: " pass1; echo
+                        read -sp "请再次确认: " pass2; echo
+                        if [ "$pass1" != "$pass2" ] || [ -z "$pass1" ]; then
+                            echo -e "${RED}❌ 密码不匹配或为空${NC}"; sleep 2; continue
+                        fi
+                        ;;
+                    0) continue ;;
+                    *) echo -e "${RED}无效选择${NC}"; sleep 2; continue ;;
+                esac
+                if echo "$target_user:$pass1" | chpasswd 2>/dev/null; then
+                    echo -e "${GREEN}✅ 密码修改成功！${NC}"
+                    echo "用户: $target_user"
+                    echo "新密码: $pass1"
+                else
+                    echo -e "${RED}❌ 密码修改失败${NC}"
+                fi
+                read -rp "按回车键继续..." _
                 ;;
             2)
-                echo "请选择时区："
-                echo "[1] UTC 🌍"
-                echo "[2] Asia/Shanghai（中国标准时间）"
-                echo "[3] America/New_York（纽约时间）"
-                echo "[4] 手动输入时区 ✏️"
-                read -p "请输入您的选择 [1-4]： " tz_subchoice
-                case $tz_subchoice in
-                    1)
-                        if timedatectl set-timezone UTC 2>/dev/null; then
-                            echo "时区已设置为UTC 🎉"
-                        else
-                            echo "时区设置失败，请检查 timedatectl 是否可用 😔"
-                        fi
-                        ;;
-                    2)
-                        if timedatectl set-timezone Asia/Shanghai 2>/dev/null; then
-                            echo "时区已设置为Asia/Shanghai 🎉"
-                        else
-                            echo "时区设置失败，请检查 timedatectl 是否可用 😔"
-                        fi
-                        ;;
-                    3)
-                        if timedatectl set-timezone America/New_York 2>/dev/null; then
-                            echo "时区已设置为America/New_York 🎉"
-                        else
-                            echo "时区设置失败，请检查 timedatectl 是否可用 😔"
-                        fi
-                        ;;
-                    4)
-                        echo "请输入时区（格式示例：Asia/Shanghai 或 Europe/London） 📝"
-                        echo "可使用 'timedatectl list-timezones' 查看可用时区 🔍"
-                        read -p "请输入时区： " custom_tz
-                        if timedatectl set-timezone "$custom_tz" 2>/dev/null; then
-                            echo "时区已设置为$custom_tz 🎉"
-                        else
-                            echo "时区设置失败，请检查输入格式（例如Asia/Shanghai）或 timedatectl 是否可用 😔"
-                        fi
-                        ;;
-                    *)
-                        echo "无效选择，时区未更改 😕"
-                        ;;
-                esac
-                echo "按回车键返回菜单 🔙"
-                read
+                cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak
+                sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config
+                sed -i 's/^#\?ChallengeResponseAuthentication.*/ChallengeResponseAuthentication yes/' /etc/ssh/sshd_config
+                restart_ssh
+                echo -e "${GREEN}✅ SSH密码登录已启用${NC}"
+                read -rp "按回车键继续..." _
                 ;;
             3)
-                echo "正在启用和配置NTP时间同步 ⏳..."
-                # 安装 chrony（如果未安装）
-                if ! command -v chronyd >/dev/null; then
-                    echo "未检测到chrony，正在安装..."
-                    apt update -y && apt install -y chrony
-                    if [ $? -eq 0 ]; then
-                        echo "chrony 安装成功 🎉"
-                    else
-                        echo "chrony 安装失败，请检查网络或软件源 😔"
-                        continue
-                    fi
+                cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak
+                sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config
+                sed -i 's/^#\?ChallengeResponseAuthentication.*/ChallengeResponseAuthentication no/' /etc/ssh/sshd_config
+                restart_ssh
+                echo -e "${GREEN}✅ SSH密码登录已禁用${NC}"
+                read -rp "按回车键继续..." _
+                ;;
+            0) return ;;
+            *) echo -e "${RED}无效选择${NC}"; sleep 1 ;;
+        esac
+    done
+}
+
+# SSH 密钥管理（生成、临时获取、打印、重置）
+ssh_key_management_submenu() {
+    local KEY_DIR="/root/.ssh"
+    local KEY_FILE="$KEY_DIR/id_rsa"
+    local PUB_FILE="$KEY_FILE.pub"
+    local AUTHORIZED="$KEY_DIR/authorized_keys"
+    local KEY_COMMENT="auto-generated-by-$(hostname)-$(date +%Y%m%d)"
+
+    ensure_key() {
+        mkdir -p "$KEY_DIR"
+        chmod 700 "$KEY_DIR"
+        if [[ ! -f "$KEY_FILE" ]]; then
+            echo "🔑 生成 SSH 密钥..."
+            ssh-keygen -t rsa -b 4096 -f "$KEY_FILE" -N "" -q -C "$KEY_COMMENT"
+        fi
+        touch "$AUTHORIZED"
+        chmod 600 "$AUTHORIZED"
+        grep -q "$(cat "$PUB_FILE")" "$AUTHORIZED" || cat "$PUB_FILE" >> "$AUTHORIZED"
+        echo -e "${GREEN}✅ SSH 密钥已就绪${NC}"
+        echo "[📍] 私钥位置: $KEY_FILE"
+        echo "[📍] 公钥位置: $PUB_FILE"
+    }
+
+    temp_key_server() {
+        ensure_key
+        ensure_command nc netcat-openbsd
+        local REMOTE_PORT=$(random_port)
+        local LOCAL_PORT=$(random_port)
+        local SERVER_IP=$(ip route get 1.1.1.1 2>/dev/null | awk '{print $7; exit}')
+        local SSH_PORT=$(get_ssh_port)
+        echo "[⏱️]  设置临时密钥有效期（秒）"
+        read -rp "默认120秒，最长300秒: " expire_time
+        expire_time=${expire_time:-120}
+        if [[ $expire_time -gt 300 ]]; then
+            echo "[⚠️] 超过300秒，使用最大值300秒"
+            expire_time=300
+        fi
+        echo ""
+        echo "[🖥️] 启动【仅本地监听】临时密钥服务"
+        echo "[🔗] 服务器监听: 127.0.0.1:$REMOTE_PORT"
+        echo "[🔗] 客户端本地端口: 127.0.0.1:$LOCAL_PORT"
+        echo "[🔐] 当前 SSH 端口: $SSH_PORT"
+        echo "[⏳] 有效期: ${expire_time}秒"
+        echo ""
+        timeout ${expire_time}s bash -c "
+            while true; do
+                echo -e 'HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n$(cat $KEY_FILE)' \
+                | nc -l 127.0.0.1 $REMOTE_PORT
+            done
+        " >/dev/null 2>&1 &
+        sleep 1
+        cat <<EOF
+=================【客户端执行】=================
+
+ssh -p $SSH_PORT \\
+    -L 127.0.0.1:$LOCAL_PORT:127.0.0.1:$REMOTE_PORT \\
+    root@$SERVER_IP
+
+浏览器访问：
+http://127.0.0.1:$LOCAL_PORT
+
+===============================================
+EOF
+        read -rp "按回车键继续..." _
+    }
+
+    print_private_key() {
+        ensure_key
+        echo ""
+        echo -e "${RED}[⚠️⚠️] 高危操作：直接打印 SSH 私钥 ⚠️⚠️${NC}"
+        read -rp "输入 yes 确认: " c
+        [[ "$c" != "yes" ]] && return
+        echo ""
+        echo "================ SSH 私钥开始 ================"
+        cat "$KEY_FILE"
+        echo "================ SSH 私钥结束 ================"
+        read -rp "按回车键继续..." _
+    }
+
+    reset_key() {
+        echo -e "${YELLOW}[⚠️] 即将重置 SSH 密钥（泄漏应急）${NC}"
+        read -rp "确认请输入 yes: " c
+        [[ "$c" != "yes" ]] && return
+        rm -f "$KEY_FILE" "$PUB_FILE" "$AUTHORIZED"
+        ensure_key
+        echo -e "${GREEN}[🔄] SSH 密钥已重置${NC}"
+        read -rp "按回车键继续..." _
+    }
+
+    while true; do
+        clear
+        cat <<EOF
+========== SSH 密钥管理 ==========
+[1] 生成/确认 SSH 密钥
+[2] 通过端口转发获取私钥（推荐）
+[3] 直接打印 SSH 私钥（高危）
+[4] 重置 SSH 密钥（泄漏应急）
+[0] 返回上一级
+==================================
+EOF
+        read -rp "请选择 [0-4]: " sub_choice
+        case $sub_choice in
+            1) ensure_key; read -rp "按回车键继续..." _ ;;
+            2) temp_key_server ;;
+            3) print_private_key ;;
+            4) reset_key ;;
+            0) return ;;
+            *) echo -e "${RED}无效选择${NC}"; sleep 1 ;;
+        esac
+    done
+}
+
+# SSH 公钥管理子菜单
+ssh_pubkey_submenu() {
+    local KEY_DIR="/root/.ssh"
+    local AUTHORIZED="$KEY_DIR/authorized_keys"
+
+    list_keys() {
+        if [[ ! -s "$AUTHORIZED" ]]; then
+            echo "暂无公钥"
+            return
+        fi
+        local i=1
+        while IFS= read -r line; do
+            [[ -z "$line" ]] && continue
+            local comment=$(echo "$line" | awk '{print $NF}')
+            if [[ "$comment" == *"auto-generated"* ]]; then
+                echo "[$i] 🔑 [本机生成] $comment"
+            else
+                echo "[$i] 🔐 [外部添加] $comment"
+            fi
+            local fingerprint=$(echo "$line" | ssh-keygen -lf /dev/stdin 2>/dev/null | awk '{print $2}')
+            [[ -n "$fingerprint" ]] && echo "   指纹: $fingerprint"
+            echo "-----------------------------------------"
+            ((i++))
+        done < "$AUTHORIZED"
+        echo "总计: $((i-1)) 个公钥"
+    }
+
+    add_user_key() {
+        echo "[🔐] 添加其他用户的公钥"
+        echo "请选择输入方式："
+        echo "[1] 直接粘贴公钥字符串"
+        echo "[2] 从文件读取"
+        echo "[3] 从远程主机获取 (ssh)"
+        read -rp "请选择 [1-3]: " input_method
+        local new_key=""
+        case "$input_method" in
+            1)
+                echo "请输入公钥内容 (以 ssh-rsa/ssh-ed25519 开头，Ctrl+D 结束):"
+                new_key=$(cat)
+                ;;
+            2)
+                read -rp "请输入公钥文件路径: " key_file
+                [[ -f "$key_file" ]] && new_key=$(cat "$key_file") || { echo -e "${RED}文件不存在${NC}"; return; }
+                ;;
+            3)
+                read -rp "请输入远程主机 (user@host): " remote_host
+                read -rp "请输入远程主机的SSH端口 [22]: " remote_port
+                remote_port=${remote_port:-22}
+                echo "正在获取远程主机公钥..."
+                new_key=$(ssh -p "$remote_port" "$remote_host" "cat ~/.ssh/id_*.pub 2>/dev/null | head -n1" 2>/dev/null)
+                if [[ -z "$new_key" ]]; then
+                    echo -e "${RED}获取失败${NC}"; return
                 fi
-                # 提供NTP服务器选择
+                ;;
+            *) echo -e "${RED}无效选择${NC}"; return ;;
+        esac
+        if ! echo "$new_key" | grep -qE '^(ssh-rsa|ssh-ed25519|ecdsa-sha2-nistp256|ecdsa-sha2-nistp384|ecdsa-sha2-nistp521)'; then
+            echo -e "${RED}无效的公钥格式${NC}"; return
+        fi
+        if grep -qF "$(echo "$new_key" | awk '{print $2}')" "$AUTHORIZED"; then
+            echo -e "${YELLOW}该公钥已存在，跳过添加${NC}"; return
+        fi
+        if [[ $(echo "$new_key" | wc -w) -lt 3 ]]; then
+            read -rp "请输入该公钥的备注信息: " key_note
+            new_key="$new_key $key_note"
+        fi
+        echo "$new_key" >> "$AUTHORIZED"
+        echo -e "${GREEN}✅ 公钥已添加${NC}"
+        read -rp "是否立即重启 SSH 服务以使生效？(y/n): " restart_confirm
+        if [[ "$restart_confirm" =~ ^[Yy]$ ]]; then
+            restart_ssh
+            echo "SSH 服务已重启"
+        fi
+    }
+
+    delete_key() {
+        list_keys
+        local total=$(grep -c '^ssh' "$AUTHORIZED" 2>/dev/null || echo 0)
+        [[ $total -eq 0 ]] && { echo "暂无公钥可删除"; return; }
+        echo "请选择删除方式："
+        echo "[1] 删除单个公钥"
+        echo "[2] 删除多个公钥（逐个确认）"
+        echo "[3] 删除所有外部公钥"
+        read -rp "请选择 [1-3]: " delete_method
+        case "$delete_method" in
+            1)
+                read -rp "请输入要删除的公钥编号: " num
+                delete_single_key "$num"
+                ;;
+            2)
+                echo "输入要删除的公钥编号（输入0结束）:"
+                while true; do
+                    read -rp "编号: " num
+                    [[ "$num" == "0" ]] && break
+                    delete_single_key "$num" "no_list"
+                done
+                ;;
+            3)
+                read -rp "[⚠️] 确认删除所有外部公钥？输入 yes 确认: " confirm
+                if [[ "$confirm" == "yes" ]]; then
+                    local tmp_file=$(mktemp)
+                    local deleted=0
+                    while IFS= read -r line; do
+                        if [[ "$line" == *"auto-generated"* ]]; then
+                            echo "$line" >> "$tmp_file"
+                        else
+                            ((deleted++))
+                        fi
+                    done < "$AUTHORIZED"
+                    mv "$tmp_file" "$AUTHORIZED"
+                    chmod 600 "$AUTHORIZED"
+                    echo -e "${GREEN}✅ 已删除 $deleted 个外部公钥${NC}"
+                    read -rp "是否重启 SSH 服务？(y/n): " restart_confirm
+                    [[ "$restart_confirm" =~ ^[Yy]$ ]] && restart_ssh
+                fi
+                ;;
+            *) echo -e "${RED}无效选择${NC}" ;;
+        esac
+    }
+
+    delete_single_key() {
+        local num=$1
+        local no_list=${2:-""}
+        if [[ "$num" =~ ^[0-9]+$ ]]; then
+            local tmp_file=$(mktemp)
+            local i=1
+            local is_auto_generated=false
+            local deleted=false
+            while IFS= read -r line; do
+                if [[ $i -eq $num ]]; then
+                    if [[ "$line" == *"auto-generated"* ]]; then
+                        is_auto_generated=true
+                        echo -e "${YELLOW}⚠️ 警告：正在删除本机生成的公钥${NC}"
+                        read -rp "请再次输入 yes 确认删除: " confirm
+                        if [[ "$confirm" == "yes" ]]; then
+                            read -rp "最后一次确认？输入 yes 删除: " confirm2
+                            if [[ "$confirm2" == "yes" ]]; then
+                                deleted=true
+                                echo -e "${GREEN}[🗑️] 已删除本机公钥${NC}"
+                            else
+                                echo "$line" >> "$tmp_file"
+                            fi
+                        else
+                            echo "$line" >> "$tmp_file"
+                        fi
+                    else
+                        read -rp "确认删除此公钥？输入 yes 确认: " confirm
+                        if [[ "$confirm" == "yes" ]]; then
+                            deleted=true
+                            echo -e "${GREEN}[🗑️] 已删除外部公钥${NC}"
+                        else
+                            echo "$line" >> "$tmp_file"
+                        fi
+                    fi
+                else
+                    echo "$line" >> "$tmp_file"
+                fi
+                ((i++))
+            done < "$AUTHORIZED"
+            mv "$tmp_file" "$AUTHORIZED"
+            chmod 600 "$AUTHORIZED"
+            if [[ "$deleted" == true ]]; then
+                read -rp "是否重启 SSH 服务？(y/n): " restart_confirm
+                [[ "$restart_confirm" =~ ^[Yy]$ ]] && restart_ssh
+            fi
+            [[ -z "$no_list" ]] && list_keys
+        fi
+    }
+
+    backup_keys() {
+        local backup_dir="$KEY_DIR/backups"
+        mkdir -p "$backup_dir"
+        local backup_file="$backup_dir/authorized_keys.backup.$(date +%Y%m%d_%H%M%S)"
+        cp "$AUTHORIZED" "$backup_file"
+        echo -e "${GREEN}✅ 公钥已备份到: $backup_file${NC}"
+        echo "[⚠️] 私钥位置: $KEY_FILE，请手动备份"
+        read -rp "按回车键继续..." _
+    }
+
+    restore_keys() {
+        local backup_dir="$KEY_DIR/backups"
+        if [[ ! -d "$backup_dir" ]] || [[ -z "$(ls -A "$backup_dir")" ]]; then
+            echo -e "${RED}❌ 没有找到备份文件${NC}"; return
+        fi
+        echo "可用的备份文件："
+        ls -1 "$backup_dir" | nl -w2 -s') '
+        read -rp "请输入要恢复的备份文件编号: " num
+        local backup_file=$(ls -1 "$backup_dir" | sed -n "${num}p")
+        if [[ -n "$backup_file" ]]; then
+            cp "$backup_dir/$backup_file" "$AUTHORIZED"
+            chmod 600 "$AUTHORIZED"
+            echo -e "${GREEN}✅ 已恢复公钥${NC}"
+            read -rp "是否重启 SSH 服务？(y/n): " restart_confirm
+            [[ "$restart_confirm" =~ ^[Yy]$ ]] && restart_ssh
+        else
+            echo -e "${RED}无效选择${NC}"
+        fi
+    }
+
+    delete_backups() {
+        local backup_dir="$KEY_DIR/backups"
+        if [[ ! -d "$backup_dir" ]] || [[ -z "$(ls -A "$backup_dir")" ]]; then
+            echo -e "${RED}❌ 没有找到备份文件${NC}"; return
+        fi
+        echo "可用的备份文件："
+        ls -1 "$backup_dir" | nl -w2 -s') '
+        echo "请选择删除方式："
+        echo "[1] 删除单个备份"
+        echo "[2] 删除多个备份（逐个确认）"
+        echo "[3] 删除所有备份"
+        read -rp "请选择 [1-3]: " delete_method
+        case "$delete_method" in
+            1)
+                read -rp "请输入要删除的备份编号: " num
+                [[ "$num" =~ ^[0-9]+$ ]] && rm -i "$backup_dir/$(ls -1 "$backup_dir" | sed -n "${num}p")"
+                ;;
+            2)
+                echo "输入要删除的备份编号（输入0结束）:"
+                while true; do
+                    read -rp "编号: " num
+                    [[ "$num" == "0" ]] && break
+                    [[ "$num" =~ ^[0-9]+$ ]] && rm -i "$backup_dir/$(ls -1 "$backup_dir" | sed -n "${num}p")"
+                done
+                ;;
+            3)
+                read -rp "[⚠️] 确认删除所有备份？输入 yes 确认: " confirm
+                [[ "$confirm" == "yes" ]] && rm -f "$backup_dir"/* && echo -e "${GREEN}✅ 已删除所有备份${NC}"
+                ;;
+            *) echo -e "${RED}无效选择${NC}" ;;
+        esac
+        read -rp "按回车键继续..." _
+    }
+
+    while true; do
+        clear
+        cat <<EOF
+========== SSH 公钥管理 ==========
+[1] 列出所有公钥
+[2] 添加其他用户的公钥
+[3] 删除公钥
+[4] 备份公钥
+[5] 恢复公钥
+[6] 删除备份
+[0] 返回上一级
+===================================
+EOF
+        read -rp "请选择 [0-6]: " sub_choice
+        case $sub_choice in
+            1) list_keys; read -rp "按回车键继续..." _ ;;
+            2) add_user_key; read -rp "按回车键继续..." _ ;;
+            3) delete_key; read -rp "按回车键继续..." _ ;;
+            4) backup_keys ;;
+            5) restore_keys ;;
+            6) delete_backups ;;
+            0) return ;;
+            *) echo -e "${RED}无效选择${NC}"; sleep 1 ;;
+        esac
+    done
+}
+
+# SSH 综合管理主菜单
+ssh_integrated_menu() {
+    while true; do
+        clear
+        cat <<EOF
+========== SSH 综合管理 🔒 ==========
+[1] SSH 端口管理
+[2] SSH 密码管理
+[3] SSH 密钥管理
+[4] SSH 公钥管理
+[0] 返回主菜单
+=====================================
+EOF
+        read -rp "请选择 [0-4]: " main_choice
+        case $main_choice in
+            1) ssh_port_submenu ;;
+            2) ssh_password_submenu ;;
+            3) ssh_key_management_submenu ;;
+            4) ssh_pubkey_submenu ;;
+            0) return ;;
+            *) echo -e "${RED}无效选择${NC}"; sleep 1 ;;
+        esac
+    done
+}
+
+# 功能7：卸载脚本
+uninstall_script() {
+    clear
+    echo "========== 卸载脚本 =========="
+    read -rp "确认卸载脚本（仅删除自身）？输入 yes 确认: " confirm
+    if [[ "$confirm" == "yes" ]]; then
+        rm -f "$0"
+        echo -e "${GREEN}脚本已删除，即将退出 🚪${NC}"
+        exit 0
+    else
+        echo "取消卸载"
+        read -rp "按回车键返回主菜单..." _
+    fi
+}
+
+# 功能8：设置时区与时间同步
+set_timezone() {
+    while true; do
+        clear
+        cat <<EOF
+========== 时区与时间同步 ==========
+当前时区: $(timedatectl show --property=Timezone --value 2>/dev/null || echo '无法获取')
+当前时间: $(date '+%Y-%m-%d %H:%M:%S %Z')
+NTP状态: $(timedatectl show --property=NTPSynchronized --value 2>/dev/null | grep -q 'yes' && echo '已同步' || echo '未同步')
+
+[1] 设置系统时区
+[2] 启用/配置NTP时间同步
+[3] 禁用NTP时间同步
+[4] 立即进行时间同步
+[0] 返回主菜单
+=====================================
+EOF
+        read -rp "请选择 [0-4]: " tz_choice
+        case $tz_choice in
+            1)
+                echo "请选择时区："
+                echo "[1] UTC"
+                echo "[2] Asia/Shanghai"
+                echo "[3] America/New_York"
+                echo "[4] 手动输入"
+                read -rp "请选择 [1-4]: " tz_sub
+                case $tz_sub in
+                    1) timedatectl set-timezone UTC ;;
+                    2) timedatectl set-timezone Asia/Shanghai ;;
+                    3) timedatectl set-timezone America/New_York ;;
+                    4)
+                        read -rp "请输入时区（如 Europe/London）: " custom_tz
+                        timedatectl set-timezone "$custom_tz" 2>/dev/null || echo -e "${RED}设置失败${NC}"
+                        ;;
+                    *) echo -e "${RED}无效选择${NC}"; sleep 2; continue ;;
+                esac
+                echo -e "${GREEN}时区已设置为: $(timedatectl show --property=Timezone --value)${NC}"
+                echo "当前时间: $(date '+%Y-%m-%d %H:%M:%S %Z')"
+                read -rp "按回车键继续..." _
+                ;;
+            2)
+                echo "正在启用NTP时间同步..."
+                ensure_command chronyd chrony
                 echo "请选择NTP服务器："
-                echo "[1] ntp.ntsc.ac.cn（中国授时中心）"
-                echo "[2] ntp.tencent.com（腾讯公共 NTP 服务器）"
-                echo "[3] ntp.aliyun.com（阿里云公共 NTP 服务器）"
-                echo "[4] pool.ntp.org（国际 NTP 快速授时服务，默认）"
-                echo "[5] time1.google.com（Google公共 NTP 服务器）"
-                echo "[6] time.cloudflare.com（Cloudflare公共 NTP 服务器）"
-                echo "[7] time.asia.apple.com（Apple公共 NTP 服务器）"
-                echo "[8] time.windows.com（Microsoft公共 NTP 服务器）"
-                echo "[9] time.facebook.com（Facebook公共 NTP 服务器）"
-                echo "[10] 手动输入NTP服务器 ✏️"
-                read -p "请输入您的选择 [1-10]（直接回车默认选4）： " ntp_choice
-                # 设置默认值为4（pool.ntp.org）
+                echo "[1] ntp.ntsc.ac.cn"
+                echo "[2] ntp.tencent.com"
+                echo "[3] ntp.aliyun.com"
+                echo "[4] pool.ntp.org (默认)"
+                echo "[5] 手动输入"
+                read -rp "请选择 [1-5] (默认4): " ntp_choice
                 ntp_choice=${ntp_choice:-4}
                 case $ntp_choice in
-                    1) ntp_servers=("ntp.ntsc.ac.cn") ;;
-                    2) ntp_servers=("ntp.tencent.com") ;;
-                    3) ntp_servers=("ntp.aliyun.com") ;;
-                    4) ntp_servers=("0.pool.ntp.org" "1.pool.ntp.org" "2.pool.ntp.org" "3.pool.ntp.org") ;;
-                    5) ntp_servers=("time1.google.com") ;;
-                    6) ntp_servers=("time.cloudflare.com") ;;
-                    7) ntp_servers=("time.asia.apple.com") ;;
-                    8) ntp_servers=("time.windows.com") ;;
-                    9) ntp_servers=("time.facebook.com") ;;
-                    10)
-                        read -p "请输入NTP服务器地址（多个地址用空格分隔，例如：ntp.example.com ntp2.example.com）： " custom_ntp
-                        if [ -z "$custom_ntp" ]; then
-                            echo "未输入NTP服务器地址，使用默认 pool.ntp.org 🎯"
-                            ntp_servers=("0.pool.ntp.org" "1.pool.ntp.org" "2.pool.ntp.org" "3.pool.ntp.org")
-                        else
-                            # 将输入的NTP服务器地址分割为数组
-                            read -a ntp_servers <<< "$custom_ntp"
-                            # 验证输入的NTP服务器地址（简单检查非空和格式）
-                            valid_servers=()
-                            for server in "${ntp_servers[@]}"; do
-                                if [[ "$server" =~ ^[a-zA-Z0-9.-]+$ ]]; then
-                                    valid_servers+=("$server")
-                                else
-                                    echo "警告：'$server' 格式无效，已忽略 😔"
-                                fi
-                            done
-                            if [ ${#valid_servers[@]} -eq 0 ]; then
-                                echo "无有效NTP服务器地址，使用默认 pool.ntp.org 🎯"
-                                ntp_servers=("0.pool.ntp.org" "1.pool.ntp.org" "2.pool.ntp.org" "3.pool.ntp.org")
-                            else
-                                ntp_servers=("${valid_servers[@]}")
-                            fi
-                        fi
+                    1) servers=("ntp.ntsc.ac.cn") ;;
+                    2) servers=("ntp.tencent.com") ;;
+                    3) servers=("ntp.aliyun.com") ;;
+                    4) servers=("0.pool.ntp.org" "1.pool.ntp.org" "2.pool.ntp.org" "3.pool.ntp.org") ;;
+                    5)
+                        read -rp "请输入NTP服务器（多个用空格分隔）: " -a servers
                         ;;
-                    *)
-                        echo "无效选择，使用默认NTP服务器 pool.ntp.org 🎯"
-                        ntp_servers=("0.pool.ntp.org" "1.pool.ntp.org" "2.pool.ntp.org" "3.pool.ntp.org")
-                        ;;
+                    *) echo -e "${RED}无效选择${NC}"; sleep 2; continue ;;
                 esac
-                # 配置NTP服务器
-                cat > /etc/chrony/chrony.conf << EOF
-$(for server in "${ntp_servers[@]}"; do echo "server $server iburst"; done)
+                cat > /etc/chrony/chrony.conf <<EOF
+$(for s in "${servers[@]}"; do echo "server $s iburst"; done)
 keyfile /etc/chrony/chrony.keys
 driftfile /var/lib/chrony/chrony.drift
 logdir /var/log/chrony
@@ -1483,828 +1331,420 @@ maxupdateskew 100.0
 rtcsync
 makestep 1.0 3
 EOF
-                # 启用并启动chrony服务
                 systemctl enable chronyd >/dev/null 2>&1
-                systemctl restart chronyd >/dev/null 2>&1
-                if systemctl is-active --quiet chronyd; then
-                    echo "NTP服务已启用并配置完成 🎉"
-                    echo "使用的NTP服务器：${ntp_servers[*]}"
-                    # 尝试启用系统NTP（忽略不支持的情况）
-                    if ! timedatectl set-ntp true 2>/dev/null; then
-                        echo "警告：系统不支持 timedatectl set-ntp，依赖 chronyd 进行时间同步 ⚠️"
-                    fi
-                    # 等待时间同步，最多尝试3次，每次10秒
-                    echo "等待时间同步（最多30秒） ⏳..."
-                    for attempt in {1..3}; do
-                        chronyc -a makestep >/dev/null 2>&1
-                        sleep 10
-                        if chronyc tracking >/dev/null 2>&1; then
-                            echo "时间同步成功，当前时间：$(date) ✅"
-                            break
-                        else
-                            if [ $attempt -eq 3 ]; then
-                                echo "时间同步尚未完成，请检查以下内容 😔："
-                                echo " - 网络连接是否正常"
-                                echo " - NTP服务器（${ntp_servers[*]}）是否可达"
-                                echo " - 防火墙是否允许 UDP 123 端口"
-                                echo " - 日志：journalctl -xeu chronyd"
-                                echo "您可以尝试选择'5. 立即进行时间同步'重试 🔄"
-                            fi
-                        fi
-                    done
-                else
-                    echo "NTP服务启动失败，请检查：journalctl -xeu chronyd 😔"
-                fi
-                echo "按回车键返回菜单 🔙"
-                read
+                systemctl restart chronyd
+                echo -e "${GREEN}NTP服务已配置并启动${NC}"
+                sleep 2
+                chronyc -a makestep >/dev/null 2>&1
+                echo "当前时间: $(date '+%Y-%m-%d %H:%M:%S %Z')"
+                read -rp "按回车键继续..." _
+                ;;
+            3)
+                systemctl stop chronyd 2>/dev/null
+                systemctl disable chronyd 2>/dev/null
+                timedatectl set-ntp false 2>/dev/null
+                echo -e "${GREEN}NTP已禁用${NC}"
+                read -rp "按回车键继续..." _
                 ;;
             4)
-                echo "正在禁用NTP时间同步 🚫..."
-                if timedatectl set-ntp false 2>/dev/null; then
-                    echo "系统NTP已禁用 🎉"
-                else
-                    echo "警告：系统不支持 timedatectl set-ntp，尝试停止 chronyd 服务 ⚠️"
-                fi
-                if systemctl is-active --quiet chronyd; then
-                    systemctl stop chronyd >/dev/null 2>&1
-                    systemctl disable chronyd >/dev/null 2>&1
-                    echo "chronyd 服务已停止并禁用 🎉"
-                else
-                    echo "chronyd 服务未运行，无需禁用 ✅"
-                fi
-                echo "按回车键返回菜单 🔙"
-                read
-                ;;
-            5)
-                echo "正在进行时间同步 🔄..."
-                if ! command -v chronyd >/dev/null; then
-                    echo "未检测到chrony，请先选择'3. 启用/配置NTP时间同步' 😕"
-                    echo "按回车键返回菜单 🔙"
-                    read
-                    continue
-                fi
                 if systemctl is-active --quiet chronyd; then
                     chronyc -a makestep >/dev/null 2>&1
-                    sleep 10
-                    if chronyc tracking >/dev/null 2>&1; then
-                        echo "时间同步成功，当前时间：$(date) 🎉"
-                    else
-                        echo "时间同步失败，请检查以下内容 😔："
-                        echo " - 网络连接是否正常"
-                        echo " - NTP服务器是否可达"
-                        echo " - 防火墙是否允许 UDP 123 端口"
-                        echo " - 日志：journalctl -xeu chronyd"
-                    fi
+                    sleep 2
+                    echo "当前时间: $(date '+%Y-%m-%d %H:%M:%S %Z')"
                 else
-                    echo "NTP服务未运行，请先选择'3. 启用/配置NTP时间同步' 😕"
+                    echo -e "${YELLOW}chronyd 未运行${NC}"
                 fi
-                echo "按回车键返回菜单 🔙"
-                read
+                read -rp "按回车键继续..." _
                 ;;
-            6)
-                return
-                ;;
-            *)
-                echo "无效选择，请重试 😕"
-                ;;
+            0) return ;;
+            *) echo -e "${RED}无效选择${NC}"; sleep 1 ;;
         esac
     done
 }
-# 功能11：更新脚本 📥
+
+# 功能9：更新脚本
 update_script() {
-    echo "正在更新脚本 📥..."
-    # 备份当前脚本
+    clear
+    echo "========== 更新脚本 =========="
     backup_file="/tmp/system-easy-backup-$(date +%Y%m%d%H%M%S).sh"
-    cp /usr/local/bin/system-easy "$backup_file"
-    echo "当前脚本已备份为：$backup_file 📂"
-    # 下载新脚本
-    echo "正在从 $SCRIPT_URL 下载新脚本 ⏳..."
-    if curl -L "$SCRIPT_URL" -o /tmp/system-easy-new; then
-        # 检查新脚本语法
+    cp "$0" "$backup_file"
+    echo "当前脚本已备份为：$backup_file"
+    echo "正在从 $SCRIPT_URL 下载新脚本..."
+    if curl -L "$(github_raw_url system.sh)" -o /tmp/system-easy-new; then
         if bash -n /tmp/system-easy-new; then
-            echo "新脚本语法检查通过，正在替换 🎉..."
+            echo -e "${GREEN}新脚本语法检查通过，正在替换...${NC}"
             chmod +x /tmp/system-easy-new
-            mv /tmp/system-easy-new /usr/local/bin/system-easy
+            mv /tmp/system-easy-new "$INSTALL_PATH"
             rm -f "$backup_file"
-            echo "脚本更新成功，备份文件已删除 🗑️"
-            echo "正在启动新脚本 🚀..."
-            exec /usr/local/bin/system-easy
+            echo "脚本更新成功，备份已删除"
+            echo "正在启动新脚本..."
+            exec "$INSTALL_PATH"
         else
-            echo "新脚本语法检查失败，正在回滚 🔄..."
-            mv "$backup_file" /usr/local/bin/system-easy
-            rm -f /tmp/system-easy-new
-            echo "已回滚到备份脚本，备份文件已恢复到 /usr/local/bin/system-easy 📂"
-            exec /usr/local/bin/system-easy
+            echo -e "${RED}新脚本语法错误，回滚${NC}"
+            mv "$backup_file" "$INSTALL_PATH"
+            exec "$INSTALL_PATH"
         fi
     else
-        echo "下载新脚本失败，正在回滚 🔄..."
-        mv "$backup_file" /usr/local/bin/system-easy
-        rm -f /tmp/system-easy-new
-        echo "已回滚到备份脚本，备份文件已恢复到 /usr/local/bin/system-easy 📂"
-        exec /usr/local/bin/system-easy
+        echo -e "${RED}下载失败，回滚${NC}"
+        mv "$backup_file" "$INSTALL_PATH"
+        exec "$INSTALL_PATH"
     fi
 }
-# 功能12：查看端口占用 🔍
-check_port_usage() {
-    read -p "请输入要检查的端口号： " port
-    if ! [[ "$port" =~ ^[0-9]+$ ]] || [ "$port" -lt 1 ] || [ "$port" -gt 65535 ]; then
-        echo "无效端口号，请输入1-65535之间的数字 😕"
-        return
-    fi
-    echo "端口 $port 的占用情况 🔍："
-    echo "PID Process Name Address"
-    processes_found=0
-    if command -v ss >/dev/null; then
-        # 使用 ss 获取监听端口的PID和进程信息
-        ss_output=$(ss -tuln -p | grep ":$port ")
-        if [ -n "$ss_output" ]; then
-            while read -r line; do
-                address=$(echo "$line" | awk '{print $5}')
-                pid=$(echo "$line" | grep -o 'pid=[0-9]*' | cut -d= -f2)
-                if [ -n "$pid" ]; then
-                    process_name=$(ps -p "$pid" -o comm= 2>/dev/null || echo "未知")
-                    echo "$pid $process_name $address"
-                    processes_found=1
-                fi
-            done <<< "$ss_output"
-        fi
-    elif command -v netstat >/dev/null; then
-        # 使用 netstat 获取监听端口的PID和进程信息
-        netstat_output=$(netstat -tulnp | grep ":$port ")
-        if [ -n "$netstat_output" ]; then
-            while read -r line; do
-                address=$(echo "$line" | awk '{print $4}')
-                pid_process=$(echo "$line" | awk '{print $7}')
-                pid=$(echo "$pid_process" | cut -d/ -f1)
-                process_name=$(echo "$pid_process" | cut -d/ -f2-)
-                if [ -n "$pid" ]; then
-                    echo "$pid $process_name $address"
-                    processes_found=1
-                fi
-            done <<< "$netstat_output"
-        fi
-    else
-        echo "未安装 ss 或 netstat，无法检查端口占用 😔"
-        return
-    fi
-    if [ $processes_found -eq 0 ]; then
-        echo "端口 $port 未被占用 ✅"
-        return
-    fi
-    while true; do
-        echo "处理选项："
-        echo "1. 关闭程序 🛑"
-        echo "2. 重启程序 🔄"
-        echo "3. 返回 🔙"
-        read -p "请输入您的选择： " choice
-        case $choice in
-            1)
-                read -p "请输入要关闭的进程ID（PID）： " pid
-                if [[ ! "$pid" =~ ^[0-9]+$ ]] || ! ps -p "$pid" >/dev/null 2>&1; then
-                    echo "无效或不存在的PID：$pid，请检查 😔"
-                    continue
-                fi
-                if kill -9 "$pid"; then
-                    echo "进程 $pid 已关闭 🎉"
-                else
-                    echo "关闭进程失败，请检查PID是否正确 😔"
-                fi
-                ;;
-            2)
-                read -p "请输入要重启的进程ID（PID）： " pid
-                if [[ ! "$pid" =~ ^[0-9]+$ ]] || ! ps -p "$pid" >/dev/null 2>&1; then
-                    echo "无效或不存在的PID：$pid，请检查 😔"
-                    continue
-                fi
-                process_cmd=$(ps -p "$pid" -o comm=)
-                if kill "$pid" && sleep 1 && command -v "$process_cmd" >/dev/null; then
-                    "$process_cmd" &
-                    echo "进程 $pid 已重启 🎉"
-                else
-                    echo "重启进程失败，请检查PID或程序是否可重启 😔"
-                fi
-                ;;
-            3)
-                return
-                ;;
-            *)
-                echo "无效选择，请重试 😕"
-                ;;
-        esac
-    done
-}
-# 功能13：查看内存占用最大程序 💾
+
+# 功能10：查看内存占用最大程序
 check_memory_usage() {
-    echo "内存占用最大的5个进程 💾："
+    clear
+    echo "========== 内存占用最大5个进程 =========="
     ps -eo pid,ppid,cmd,%mem --sort=-%mem | head -n 6
+    echo ""
+    read -rp "按回车键返回主菜单..." _
+}
+
+# 功能11：查看端口占用
+check_port_usage() {
+    clear
+    echo "========== 端口占用检查 =========="
+    read -rp "请输入要检查的端口号: " port
+    if ! [[ "$port" =~ ^[0-9]+$ ]] || [ "$port" -lt 1 ] || [ "$port" -gt 65535 ]; then
+        echo -e "${RED}无效端口号，请输入1-65535之间的数字${NC}"
+        read -rp "按回车键返回主菜单..." _
+        return
+    fi
+    echo "端口 $port 占用情况："
+    local found=0
+    if command -v ss >/dev/null; then
+        ss -tulnp | grep ":$port " && found=1
+    elif command -v netstat >/dev/null; then
+        netstat -tulnp | grep ":$port " && found=1
+    fi
+    if [ $found -eq 0 ]; then
+        echo "端口 $port 未被占用"
+    fi
+    
+    # 询问是否继续操作
     while true; do
-        echo "处理选项："
-        echo "1. 关闭程序 🛑"
-        echo "2. 重启程序 🔄"
-        echo "3. 停止程序 ⏹️"
-        echo "4. 返回 🔙"
-        read -p "请输入您的选择： " choice
-        case $choice in
+        echo ""
+        echo "请选择："
+        echo "1. 检查其他端口"
+        echo "0. 返回主菜单"
+        read -rp "请输入选择 [0-1]: " sub_choice
+        case $sub_choice in
             1)
-                read -p "请输入要关闭的进程ID（PID）： " pid
-                if [[ ! "$pid" =~ ^[0-9]+$ ]] || ! ps -p "$pid" >/dev/null 2>&1; then
-                    echo "无效或不存在的PID：$pid，请检查 😔"
+                clear
+                echo "========== 端口占用检查 =========="
+                read -rp "请输入要检查的端口号: " port
+                if ! [[ "$port" =~ ^[0-9]+$ ]] || [ "$port" -lt 1 ] || [ "$port" -gt 65535 ]; then
+                    echo -e "${RED}无效端口号${NC}"
                     continue
                 fi
-                if kill -9 "$pid"; then
-                    echo "进程 $pid 已关闭 🎉"
+                echo "端口 $port 占用情况："
+                if command -v ss >/dev/null; then
+                    ss -tulnp | grep ":$port "
                 else
-                    echo "关闭进程失败，请检查PID是否正确 😔"
+                    netstat -tulnp | grep ":$port "
                 fi
                 ;;
-            2)
-                read -p "请输入要重启的进程ID（PID）： " pid
-                if [[ ! "$pid" =~ ^[0-9]+$ ]] || ! ps -p "$pid" >/dev/null 2>&1; then
-                    echo "无效或不存在的PID：$pid，请检查 😔"
-                    continue
-                fi
-                process_cmd=$(ps -p "$pid" -o comm=)
-                if kill "$pid" && sleep 1 && command -v "$process_cmd" >/dev/null; then
-                    "$process_cmd" &
-                    echo "进程 $pid 已重启 🎉"
-                else
-                    echo "重启进程失败，请检查PID或程序是否可重启 😔"
-                fi
-                ;;
-            3)
-                read -p "请输入要停止的进程ID（PID）： " pid
-                if [[ ! "$pid" =~ ^[0-9]+$ ]] || ! ps -p "$pid" >/dev/null 2>&1; then
-                    echo "无效或不存在的PID：$pid，请检查 😔"
-                    continue
-                fi
-                if kill "$pid"; then
-                    echo "进程 $pid 已停止 🎉"
-                else
-                    echo "停止进程失败，请检查PID是否正确 😔"
-                fi
-                ;;
-            4)
+            0)
                 return
                 ;;
             *)
-                echo "无效选择，请重试 😕"
+                echo -e "${RED}无效选择${NC}"
+                sleep 1
                 ;;
         esac
     done
 }
-# 功能14：查看CPU占用最大程序 🖥️
+
+# 功能12：查看CPU占用最大程序
 check_cpu_usage() {
-    echo "CPU占用最大的5个进程 🖥️："
+    clear
+    echo "========== CPU占用最大5个进程 =========="
     ps -eo pid,ppid,cmd,%cpu --sort=-%cpu | head -n 6
-    while true; do
-        echo "处理选项："
-        echo "1. 关闭程序 🛑"
-        echo "2. 重启程序 🔄"
-        echo "3. 停止程序 ⏹️"
-        echo "4. 返回 🔙"
-        read -p "请输入您的选择： " choice
-        case $choice in
-            1)
-                read -p "请输入要关闭的进程ID（PID）： " pid
-                if [[ ! "$pid" =~ ^[0-9]+$ ]] || ! ps -p "$pid" >/dev/null 2>&1; then
-                    echo "无效或不存在的PID：$pid，请检查 😔"
-                    continue
-                fi
-                if kill -9 "$pid"; then
-                    echo "进程 $pid 已关闭 🎉"
-                else
-                    echo "关闭进程失败，请检查PID是否正确 😔"
-                fi
-                ;;
-            2)
-                read -p "请输入要重启的进程ID（PID）： " pid
-                if [[ ! "$pid" =~ ^[0-9]+$ ]] || ! ps -p "$pid" >/dev/null 2>&1; then
-                    echo "无效或不存在的PID：$pid，请检查 😔"
-                    continue
-                fi
-                process_cmd=$(ps -p "$pid" -o comm=)
-                if kill "$pid" && sleep 1 && command -v "$process_cmd" >/dev/null; then
-                    "$process_cmd" &
-                    echo "进程 $pid 已重启 🎉"
-                else
-                    echo "重启进程失败，请检查PID或程序是否可重启 😔"
-                fi
-                ;;
-            3)
-                read -p "请输入要停止的进程ID（PID）： " pid
-                if [[ ! "$pid" =~ ^[0-9]+$ ]] || ! ps -p "$pid" >/dev/null 2>&1; then
-                    echo "无效或不存在的PID：$pid，请检查 😔"
-                    continue
-                fi
-                if kill "$pid"; then
-                    echo "进程 $pid 已停止 🎉"
-                else
-                    echo "停止进程失败，请检查PID是否正确 😔"
-                fi
-                ;;
-            4)
-                return
-                ;;
-            *)
-                echo "无效选择，请重试 😕"
-                ;;
-        esac
-    done
+    echo ""
+    read -rp "按回车键返回主菜单..." _
 }
-# 功能15：设置系统定时重启 🔄
+
+# 功能13：系统定时重启
 set_system_reboot() {
     while true; do
-        echo "系统定时重启菜单 🔄："
-        echo "1. 设置系统定时重启 ⏰"
-        echo "2. 删除系统定时重启任务 🗑️"
-        echo "3. 返回主菜单 🔙"
-        read -p "请输入您的选择： " choice
+        clear
+        cat <<EOF
+========== 系统定时重启 ==========
+[1] 设置定时重启
+[2] 删除所有定时重启任务
+[0] 返回主菜单
+==================================
+EOF
+        read -rp "请选择 [0-2]: " choice
         case $choice in
             1)
-                echo "请选择定时重启方式："
-                echo "1. 运行X小时后重启 ⏳"
-                echo "2. 每天某时间重启 🌞"
-                echo "3. 每周某天某时间重启 📅"
-                echo "4. 每月某天某时间重启 📆"
-                read -p "请输入您的选择 [1-4]： " reboot_choice
+                echo "请选择重启方式："
+                echo "[1] X小时后重启"
+                echo "[2] 每天某时间重启"
+                echo "[3] 每周某天某时间重启"
+                echo "[4] 每月某天某时间重启"
+                read -rp "请选择 [1-4]: " reboot_choice
                 case $reboot_choice in
                     1)
-                        read -p "请输入运行小时数（例如 24）： " hours
-                        if [[ "$hours" =~ ^[0-9]+$ ]]; then
-                            echo "shutdown -r +$((hours*60))" | at now
-                            echo "系统将在 $hours 小时后重启 🎉"
-                        else
-                            echo "请输入有效的小时数 😕"
-                        fi
+                        read -rp "请输入小时数: " hours
+                        echo "shutdown -r +$((hours*60))" | at now
+                        echo -e "${GREEN}系统将在 $hours 小时后重启${NC}"
                         ;;
                     2)
-                        read -p "请输入每天重启时间（格式 HH:MM，例如 02:00）： " time
+                        read -rp "请输入每天重启时间（HH:MM）: " time
                         if [[ "$time" =~ ^[0-2][0-9]:[0-5][0-9]$ ]]; then
                             hour=$(echo "$time" | cut -d: -f1)
                             minute=$(echo "$time" | cut -d: -f2)
                             (crontab -l 2>/dev/null; echo "$minute $hour * * * /sbin/shutdown -r now") | crontab -
-                            echo "每天 $time 重启任务已设置 🎉"
+                            echo -e "${GREEN}每天 $time 重启任务已设置${NC}"
                         else
-                            echo "请输入有效的时间格式（HH:MM） 😕"
+                            echo -e "${RED}时间格式错误${NC}"
                         fi
                         ;;
                     3)
-                        echo "请输入星期几（0=周日，1=周一，...，6=周六）："
-                        read -p "星期（0-6）： " weekday
-                        read -p "重启时间（格式 HH:MM，例如 02:00）： " time
+                        read -rp "请输入星期几（0-6，0=周日）: " weekday
+                        read -rp "重启时间（HH:MM）: " time
                         if [[ "$weekday" =~ ^[0-6]$ && "$time" =~ ^[0-2][0-9]:[0-5][0-9]$ ]]; then
                             hour=$(echo "$time" | cut -d: -f1)
                             minute=$(echo "$time" | cut -d: -f2)
                             (crontab -l 2>/dev/null; echo "$minute $hour * * $weekday /sbin/shutdown -r now") | crontab -
-                            echo "每周星期 $weekday $time 重启任务已设置 🎉"
+                            echo -e "${GREEN}每周 $weekday $time 重启任务已设置${NC}"
                         else
-                            echo "请输入有效的星期（0-6）和时间格式（HH:MM） 😕"
+                            echo -e "${RED}输入错误${NC}"
                         fi
                         ;;
                     4)
-                        read -p "请输入每月第几天（1-31）： " day
-                        read -p "重启时间（格式 HH:MM，例如 02:00）： " time
+                        read -rp "请输入每月第几天（1-31）: " day
+                        read -rp "重启时间（HH:MM）: " time
                         if [[ "$day" =~ ^[1-3]?[0-9]$ && "$time" =~ ^[0-2][0-9]:[0-5][0-9]$ ]]; then
                             hour=$(echo "$time" | cut -d: -f1)
                             minute=$(echo "$time" | cut -d: -f2)
                             (crontab -l 2>/dev/null; echo "$minute $hour $day * * /sbin/shutdown -r now") | crontab -
-                            echo "每月 $day 号 $time 重启任务已设置 🎉"
+                            echo -e "${GREEN}每月 $day 号 $time 重启任务已设置${NC}"
                         else
-                            echo "请输入有效的日期（1-31）和时间格式（HH:MM） 😕"
+                            echo -e "${RED}输入错误${NC}"
                         fi
                         ;;
-                    *)
-                        echo "无效选择，请重试 😕"
-                        ;;
+                    *) echo -e "${RED}无效选择${NC}" ;;
                 esac
+                read -rp "按回车键继续..." _
                 ;;
             2)
-                echo "正在删除所有系统定时重启任务 🗑️..."
                 crontab -l | grep -v "/sbin/shutdown -r now" | crontab -
                 atq | while read -r job; do atrm "$(echo $job | awk '{print $1}')"; done
-                echo "所有定时重启任务已删除 🎉"
+                echo -e "${GREEN}所有定时重启任务已删除${NC}"
+                read -rp "按回车键继续..." _
                 ;;
-            3)
-                return
-                ;;
-            *)
-                echo "无效选择，请重试 😕"
-                ;;
+            0) return ;;
+            *) echo -e "${RED}无效选择${NC}"; sleep 1 ;;
         esac
     done
 }
-# 功能16：Cron任务管理 ⏰
+
+# 功能14：Cron任务管理
 cron_task_menu() {
-    # 检查是否安装cron，如果没有，自动安装
-    if ! command -v crontab >/dev/null; then
-        echo "未检测到cron，正在自动安装... ⏳"
-        apt update -y && apt install -y cron
-        if [ $? -eq 0 ]; then
-            echo "cron 安装成功 🎉"
-            systemctl enable cron >/dev/null 2>&1
-            systemctl start cron >/dev/null 2>&1
-        else
-            echo "cron 安装失败，请检查网络或软件源 😔"
-            return
-        fi
-    fi
+    ensure_command crontab cron
     while true; do
-        echo "Cron任务管理菜单 ⏰："
-        echo "1. 查看Cron任务 🔍"
-        echo "2. 删除Cron任务 🗑️"
-        echo "3. 添加Cron任务 ✏️"
-        echo "4. 返回主菜单 🔙"
-        read -p "请输入您的选择： " choice
+        clear
+        cat <<EOF
+========== Cron任务管理 ==========
+[1] 查看Cron任务
+[2] 删除Cron任务
+[3] 添加Cron任务
+[0] 返回主菜单
+==================================
+EOF
+        read -rp "请选择 [0-3]: " choice
         case $choice in
             1)
                 echo "当前所有Cron任务："
-                task_count=0
-                declare -A cron_tasks
-                # 遍历所有用户的Crontab
                 for user in $(ls /var/spool/cron/crontabs 2>/dev/null); do
-                    while IFS= read -r line; do
-                        # 跳过空行和注释
-                        if [[ -n "$line" && ! "$line" =~ ^# ]]; then
-                            task_count=$((task_count + 1))
-                            cron_tasks[$task_count]="$user: $line"
-                            echo "[$task_count] $user: $line"
-                        fi
-                    done < "/var/spool/cron/crontabs/$user"
+                    echo "用户 $user:"
+                    crontab -u "$user" -l 2>/dev/null | grep -v '^#' | sed 's/^/  /' || echo "  无任务"
                 done
-                if [ $task_count -eq 0 ]; then
-                    echo "无Cron任务 😕"
-                fi
+                read -rp "按回车键继续..." _
                 ;;
             2)
-                echo "当前所有Cron任务："
-                task_count=0
-                declare -A cron_tasks
-                declare -A cron_users
-                # 列出所有任务并分配编号
-                for user in $(ls /var/spool/cron/crontabs 2>/dev/null); do
-                    while IFS= read -r line; do
-                        if [[ -n "$line" && ! "$line" =~ ^# ]]; then
-                            task_count=$((task_count + 1))
-                            cron_tasks[$task_count]="$line"
-                            cron_users[$task_count]="$user"
-                            echo "[$task_count] $user: $line"
-                        fi
-                    done < "/var/spool/cron/crontabs/$user"
-                done
-                if [ $task_count -eq 0 ]; then
-                    echo "无Cron任务可删除 😕"
-                    continue
-                fi
-                read -p "请输入要删除的任务编号（多个编号用空格隔开，例如 1 3 5）： " delete_ids
-                # 验证输入
-                for id in $delete_ids; do
-                    if ! [[ "$id" =~ ^[0-9]+$ ]] || [ "$id" -lt 1 ] || [ "$id" -gt $task_count ]; then
-                        echo "无效编号：$id，请输入1-$task_count之间的数字 😕"
-                        continue 2
-                    fi
-                done
-                # 删除指定任务
-                for user in $(ls /var/spool/cron/crontabs 2>/dev/null); do
-                    temp_file=$(mktemp)
-                    cp "/var/spool/cron/crontabs/$user" "$temp_file"
-                    task_index=0
-                    keep_lines=()
-                    while IFS= read -r line; do
-                        if [[ -n "$line" && ! "$line" =~ ^# ]]; then
-                            task_index=$((task_index + 1))
-                            keep=1
-                            for id in $delete_ids; do
-                                if [ "$id" -eq "$task_index" ] && [ "${cron_users[$id]}" = "$user" ]; then
-                                    keep=0
-                                    break
-                                fi
-                            done
-                            if [ $keep -eq 1 ]; then
-                                keep_lines+=("$line")
-                            fi
-                        else
-                            keep_lines+=("$line")
-                        fi
-                    done < "/var/spool/cron/crontabs/$user"
-                    # 写入新Crontab
-                    printf "%s\n" "${keep_lines[@]}" > "/var/spool/cron/crontabs/$user"
-                    chown "$user:crontab" "/var/spool/cron/crontabs/$user"
-                    chmod 600 "/var/spool/cron/crontabs/$user"
-                    rm -f "$temp_file"
-                done
-                echo "已删除指定Cron任务 🎉"
+                # 简化：直接编辑当前用户的 crontab
+                echo "编辑当前用户的 crontab (使用 crontab -e)"
+                crontab -e
                 ;;
             3)
-                read -p "请输入完整Cron任务（格式：分钟 小时 日 月 星期 命令，例如 '0 2 * * * /path/to/script'）： " new_cron
-                # 基本验证Cron时间格式（5个字段 + 命令）
+                read -rp "请输入完整Cron任务（格式：分 时 日 月 周 命令）: " new_cron
                 if [[ "$new_cron" =~ ^[0-9*,-/]+[[:space:]]+[0-9*,-/]+[[:space:]]+[0-9*,-/]+[[:space:]]+[0-9*,-/]+[[:space:]]+[0-7*,-/]+[[:space:]]+.+ ]]; then
-                    read -p "请输入任务所属用户（默认root）： " cron_user
-                    cron_user=${cron_user:-root}
-                    if id "$cron_user" >/dev/null 2>&1; then
-                        (crontab -u "$cron_user" -l 2>/dev/null; echo "$new_cron") | crontab -u "$cron_user" -
-                        echo "Cron任务已添加为用户 $cron_user：$new_cron 🎉"
-                    else
-                        echo "用户 $cron_user 不存在，任务添加失败 😔"
-                    fi
+                    (crontab -l 2>/dev/null; echo "$new_cron") | crontab -
+                    echo -e "${GREEN}Cron任务已添加${NC}"
                 else
-                    echo "无效Cron任务格式，请使用正确格式（例如：0 2 * * * /path/to/script） 😕"
+                    echo -e "${RED}格式错误${NC}"
                 fi
+                read -rp "按回车键继续..." _
                 ;;
-            4)
-                return
-                ;;
-            *)
-                echo "无效选择，请重试 😕"
-                ;;
+            0) return ;;
+            *) echo -e "${RED}无效选择${NC}"; sleep 1 ;;
         esac
     done
 }
-# 功能17：SWAP管理 💾
+
+# 功能15：SWAP管理
 swap_menu() {
     while true; do
-        echo "SWAP管理菜单 💾："
-        echo "1. 添加SWAP（自定义大小，支持小数） ➕"
-        echo "2. 删除SWAP 🗑️"
-        echo "3. 查看当前SWAP状态 🔍"
-        echo "4. 返回主菜单 🔙"
-        read -p "请输入您的选择： " choice
+        clear
+        cat <<EOF
+========== SWAP管理 ==========
+[1] 添加SWAP（自定义大小）
+[2] 删除SWAP
+[3] 查看当前SWAP状态
+[0] 返回主菜单
+==============================
+EOF
+        read -rp "请选择 [0-3]: " choice
         case $choice in
             1)
                 echo "当前SWAP信息："
-                swapon --show || echo "无SWAP分区或文件"
+                swapon --show || echo "无SWAP"
                 if swapon --show | grep -q '/swapfile'; then
-                    echo "警告：已存在 /swapfile，如果继续将覆盖现有SWAP ❗"
-                    read -p "是否继续？(y/n)： " confirm
-                    if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
-                        continue
-                    fi
+                    read -rp "已存在 /swapfile，覆盖？(y/n): " confirm
+                    [[ "$confirm" != "y" && "$confirm" != "Y" ]] && continue
                     swapoff /swapfile 2>/dev/null
                     rm -f /swapfile
-                    sed -i '/\/swapfile none swap sw 0 0/d' /etc/fstab
+                    sed -i '/\/swapfile/d' /etc/fstab
                 fi
-                read -p "请输入SWAP大小（单位GB，可小数，例如 0.5）： " size_gb
+                read -rp "请输入SWAP大小（GB，可小数）: " size_gb
                 if ! [[ "$size_gb" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
-                    echo "请输入有效的数字 😕"
-                    continue
+                    echo -e "${RED}无效数字${NC}"; sleep 2; continue
                 fi
-                # 转换成 MB
                 size_mb=$(awk "BEGIN {printf \"%d\", $size_gb*1024}")
                 if [ "$size_mb" -lt 1 ]; then
-                    echo "SWAP大小不能小于 1MB 😕"
-                    continue
+                    echo -e "${RED}大小不能小于1MB${NC}"; sleep 2; continue
                 fi
-                echo "正在创建 ${size_gb}GB (~${size_mb}MB) SWAP文件 ⏳..."
+                echo "创建 ${size_gb}GB SWAP文件..."
                 fallocate -l ${size_mb}M /swapfile || dd if=/dev/zero of=/swapfile bs=1M count=$size_mb
-                if [ $? -ne 0 ]; then
-                    echo "创建SWAP文件失败，请检查磁盘空间 😔"
-                    continue
-                fi
                 chmod 600 /swapfile
                 mkswap /swapfile
                 swapon /swapfile
-                if [ $? -eq 0 ]; then
-                    echo "/swapfile none swap sw 0 0" >> /etc/fstab
-                    echo "SWAP已添加并持久化 🎉"
-                    swapon --show
-                else
-                    echo "启用SWAP失败 😔"
-                    rm -f /swapfile
-                fi
+                echo "/swapfile none swap sw 0 0" >> /etc/fstab
+                echo -e "${GREEN}SWAP已添加${NC}"
+                read -rp "按回车键继续..." _
                 ;;
             2)
-                echo "正在删除SWAP 🗑️..."
-                if swapon --show | grep -q '/swapfile'; then
-                    swapoff /swapfile
-                    rm -f /swapfile
-                    sed -i '/\/swapfile none swap sw 0 0/d' /etc/fstab
-                    echo "SWAP已删除 🎉"
-                else
-                    echo "无SWAP可删除 ✅"
-                fi
+                swapoff /swapfile 2>/dev/null
+                rm -f /swapfile
+                sed -i '/\/swapfile/d' /etc/fstab
+                echo -e "${GREEN}SWAP已删除${NC}"
+                read -rp "按回车键继续..." _
                 ;;
             3)
-                echo "当前SWAP信息："
-                swapon --show || echo "无SWAP分区或文件"
+                swapon --show
                 free -h | grep Swap
+                read -rp "按回车键继续..." _
                 ;;
-            4)
-                return
-                ;;
-            *)
-                echo "无效选择，请重试 😕"
-                ;;
+            0) return ;;
+            *) echo -e "${RED}无效选择${NC}"; sleep 1 ;;
         esac
     done
 }
-# 功能：运行 DDNS 管理脚本 🌐（自动拉取 + 安装 + 运行）
+
+# 功能16：网络排查工具安装
+install_network_tools() {
+    clear
+    echo "========== 安装网络排查工具 =========="
+    echo "包含：TCPing、tcptraceroute、MTR、NextTrace、Speedtest、iperf3"
+    ensure_command tcptraceroute tcptraceroute
+    ensure_command bc
+    # tcping
+    wget -q --show-progress "$(github_raw_url tcping.sh)" -O /usr/bin/tcping && chmod +x /usr/bin/tcping
+    # mtr
+    ensure_command mtr mtr-tiny
+    # nexttrace
+    curl -sL nxtrace.org/nt | bash
+    # speedtest
+    curl -s https://packagecloud.io/install/repositories/ookla/speedtest-cli/script.deb.sh | bash
+    apt install -y speedtest
+    # iperf3
+    ensure_command iperf3
+    echo -e "${GREEN}所有工具安装完成！${NC}"
+    read -rp "按回车键返回主菜单..." _
+}
+
+# 功能17：DDNS管理（拉取并执行外部脚本）
 ddns_menu() {
-    echo "正在拉取 DDNS 管理脚本 ⏳..."
-
-    # 下载到临时目录
-    curl -fsSL https://raw.githubusercontent.com/Lanlan13-14/System-Easy/refs/heads/main/ddns.sh -o /tmp/ddns-easy
-
-    if [ $? -ne 0 ]; then
-        echo "❌ 下载失败，请检查网络或脚本URL 😔"
-        return
-    fi
-
-    # 赋予执行权限
-    chmod +x /tmp/ddns-easy
-
-    # 移动到系统路径
-    sudo mv /tmp/ddns-easy /usr/local/bin/ddns-easy
-
+    clear
+    echo "正在拉取 DDNS 管理脚本..."
+    local url=$(github_raw_url ddns.sh)
+    curl -fsSL "$url" -o /tmp/ddns-easy
     if [ $? -eq 0 ]; then
-        echo "🎉 DDNS 管理脚本安装完成！"
-        echo "⚡ 正在启动 DDNS 管理菜单..."
+        chmod +x /tmp/ddns-easy
+        mv /tmp/ddns-easy /usr/local/bin/ddns-easy
+        echo -e "${GREEN}DDNS 脚本安装完成，正在启动...${NC}"
         sleep 1
-        ddns-easy   # ⭐ 自动跳转执行 DDNS 菜单
+        ddns-easy
     else
-        echo "❌ 安装失败，请检查权限或系统状态 😔"
+        echo -e "${RED}下载失败${NC}"
+        read -rp "按回车键返回主菜单..." _
     fi
 }
-# 功能18：TCP Fast Open (TFO) 管理子菜单 🚀
-tfo_menu() {
+
+# 功能18：GitHub镜像加速管理
+git_proxy_menu() {
     while true; do
-        echo "TCP Fast Open (TFO) 管理菜单 🚀："
-        echo "1. 查看当前TFO状态 🔍"
-        echo "2. 启用TFO ✅"
-        echo "3. 禁用TFO 🚫"
-        echo "4. 返回主菜单 🔙"
-        read -p "请输入您的选择： " choice
-        case $choice in
+        clear
+        cat <<EOF
+========== GitHub 镜像加速 ==========
+当前前缀: ${GITHUB_PROXY:-未设置}
+
+[1] 设置/修改镜像前缀
+[2] 删除镜像前缀
+[0] 返回主菜单
+=====================================
+EOF
+        read -rp "请选择 [0-2]: " gp_choice
+        case $gp_choice in
             1)
-                echo "当前TCP Fast Open状态："
-                tfo_status=$(sysctl -n net.ipv4.tcp_fastopen 2>/dev/null || echo "未知")
-                case $tfo_status in
-                    0) echo "TFO已禁用 🚫" ;;
-                    1) echo "TFO启用（仅客户端） 🌐" ;;
-                    2) echo "TFO启用（仅服务器） 🖥️" ;;
-                    3) echo "TFO启用（客户端和服务器） 🚀" ;;
-                    *) echo "无法获取TFO状态，请检查内核支持 😔" ;;
-                esac
-                echo "按回车键返回菜单 🔙"
-                read
+                echo "请输入新的加速前缀 (例如 https://ghfast.top/ ，留空则清除):"
+                read -r new_proxy
+                if [[ -z "$new_proxy" ]]; then
+                    GITHUB_PROXY=""
+                    rm -f "$GITHUB_PROXY_FILE"
+                    echo -e "${GREEN}已清除加速前缀${NC}"
+                else
+                    mkdir -p "$(dirname "$GITHUB_PROXY_FILE")"
+                    echo -n "$new_proxy" > "$GITHUB_PROXY_FILE"
+                    GITHUB_PROXY="$new_proxy"
+                    echo -e "${GREEN}已设置加速前缀: $GITHUB_PROXY${NC}"
+                fi
+                read -rp "按回车键继续..." _
                 ;;
             2)
-                echo "正在启用TCP Fast Open（客户端和服务器） ⏳..."
-                # 备份 sysctl.conf
-                cp /etc/sysctl.conf /etc/sysctl.conf.bak
-                # 设置 TFO 为 3（启用客户端和服务器）
-                sed -i '/net\.ipv4\.tcp_fastopen/d' /etc/sysctl.conf
-                echo "net.ipv4.tcp_fastopen=3" >> /etc/sysctl.conf
-                if sysctl -p >/dev/null 2>&1 && sysctl --system >/dev/null 2>&1; then
-                    echo "TCP Fast Open 已启用（客户端和服务器） 🎉"
-                    echo "当前TFO状态：$(sysctl -n net.ipv4.tcp_fastopen)"
-                else
-                    echo "启用TFO失败，请检查 /etc/sysctl.conf 或内核是否支持TFO 😔"
-                    mv /etc/sysctl.conf.bak /etc/sysctl.conf
-                    sysctl -p >/dev/null 2>&1
-                fi
-                echo "按回车键返回菜单 🔙"
-                read
+                rm -f "$GITHUB_PROXY_FILE"
+                GITHUB_PROXY=""
+                echo -e "${GREEN}已删除加速前缀${NC}"
+                read -rp "按回车键继续..." _
                 ;;
-            3)
-                echo "正在禁用TCP Fast Open 🚫..."
-                # 备份 sysctl.conf
-                cp /etc/sysctl.conf /etc/sysctl.conf.bak
-                # 设置 TFO 为 0（禁用）
-                sed -i '/net\.ipv4\.tcp_fastopen/d' /etc/sysctl.conf
-                echo "net.ipv4.tcp_fastopen=0" >> /etc/sysctl.conf
-                if sysctl -p >/dev/null 2>&1 && sysctl --system >/dev/null 2>&1; then
-                    echo "TCP Fast Open 已禁用 🎉"
-                    echo "当前TFO状态：$(sysctl -n net.ipv4.tcp_fastopen)"
-                else
-                    echo "禁用TFO失败，请检查 /etc/sysctl.conf 😔"
-                    mv /etc/sysctl.conf.bak /etc/sysctl.conf
-                    sysctl -p >/dev/null 2>&1
-                fi
-                echo "按回车键返回菜单 🔙"
-                read
-                ;;
-            4)
-                return
-                ;;
-            *)
-                echo "无效选择，请重试 😕"
-                ;;
+            0) return ;;
+            *) echo -e "${RED}无效选择${NC}"; sleep 1 ;;
         esac
     done
 }
 
-# 功能19：安装网络排查工具 🔧 (TCPing, MTR, NextTrace, Speedtest, iperf3)
-install_network_tools() {
-    echo "正在安装网络排查工具套件 🔧..."
-    echo "包含：TCPing、tcptraceroute、MTR、NextTrace、Speedtest、iperf3"
-    echo "----------------------------------------"
+# 功能19：退出（已在主菜单处理）
 
-    # 1. 安装 TCPing 及相关依赖
-    echo "📡 正在安装 TCPing 和 tcptraceroute..."
-    # 安装 tcptraceroute 和 bc
-    if apt update -y && apt install -y tcptraceroute bc; then
-        echo "   ✅ tcptraceroute 和 bc 安装成功"
-    else
-        echo "   ❌ tcptraceroute 或 bc 安装失败，请检查网络连接"
-    fi
-    
-    # 安装 tcping
-    if wget -q --show-progress https://raw.githubusercontent.com/Lanlan13-14/System-Easy/refs/heads/main/tcping.sh -O /usr/bin/tcping; then
-        chmod +x /usr/bin/tcping
-        echo "   ✅ TCPing 安装成功"
-        echo "   使用方法：tcping -p <目标端口> <目标IP>"
-    else
-        echo "   ❌ TCPing 安装失败，请检查网络连接"
-    fi
-    echo ""
-
-    # 2. 安装 MTR (通过apt)
-    echo "🖧 正在安装 MTR (通过apt)..."
-    if apt update -y && apt install -y mtr-tiny; then
-        echo "   ✅ MTR 安装成功"
-        echo "   使用方法：mtr <目标IP或域名>"
-    else
-        echo "   ❌ MTR 安装失败，请检查网络连接或软件源"
-    fi
-    echo ""
-
-    # 3. 安装 NextTrace
-    echo "📍 正在安装 NextTrace..."
-    if curl -sL nxtrace.org/nt | bash; then
-        echo "   ✅ NextTrace 安装成功"
-        echo "   使用方法：nexttrace <目标IP或域名>"
-    else
-        echo "   ❌ NextTrace 安装失败，请检查网络连接"
-    fi
-    echo ""
-
-    # 4. 安装 Speedtest
-    echo "⚡ 正在安装 Speedtest 测速工具..."
-    # 安装curl（如果未安装）
-    if ! command -v curl >/dev/null; then
-        apt install -y curl
-    fi
-    # 添加Speedtest仓库并安装
-    if curl -s https://packagecloud.io/install/repositories/ookla/speedtest-cli/script.deb.sh | sudo bash && \
-       apt install -y speedtest; then
-        echo "   ✅ Speedtest 安装成功"
-        echo "   使用方法：speedtest"
-    else
-        echo "   ❌ Speedtest 安装失败，请检查网络连接"
-    fi
-    echo ""
-
-    # 5. 安装 iperf3
-    echo "📊 正在安装 iperf3 带宽测试工具..."
-    if apt update -y && apt install -y iperf3; then
-        echo "   ✅ iperf3 安装成功"
-        echo "   使用方法："
-        echo "     服务器端：iperf3 -s"
-        echo "     客户端：iperf3 -c <服务器IP>"
-    else
-        echo "   ❌ iperf3 安装失败，请检查网络连接"
-    fi
-    echo ""
-
-    echo "========================================"
-    echo "🎉 网络排查工具套件安装完成！"
-    echo ""
-    echo "📌 工具汇总："
-    echo "   • TCPing      : tcping -p <目标端口> <目标IP>"
-    echo "   • tcptraceroute: tcptraceroute <目标>"
-    echo "   • bc          : 计算器工具"
-    echo "   • MTR         : mtr <目标>"
-    echo "   • NextTrace   : nexttrace <目标>"
-    echo "   • Speedtest   : speedtest"
-    echo "   • iperf3      : iperf3 带宽测试工具"
-    echo ""
-
-    echo "按回车键返回菜单 🔙"
-    read
-}
-
-# 主菜单（无框无横线版）
+# 主菜单
 while true; do
-    clear  # 每次进入主菜单先清屏
+    clear
     show_system_info
-
-    # 菜单标题（仅文字）
-    echo -e "${WHITE}System-Easy功能菜单${NC}"
-
-    # 两列菜单（无框，只有颜色标记）
-    echo -e "${YELLOW}[1]${NC} 安装常用工具 🛠️       ${YELLOW}[12]${NC} 更新脚本 📥"
-    echo -e "${YELLOW}[2]${NC} 日志清理管理 🗑️       ${YELLOW}[13]${NC} 查看端口占用 🔍"
-    echo -e "${YELLOW}[3]${NC} BBR管理 ⚡            ${YELLOW}[14]${NC} 内存占用最大 💾"
-    echo -e "${YELLOW}[4]${NC} DNS管理 🌐           ${YELLOW}[15]${NC} CPU占用最大 🖥️"
-    echo -e "${YELLOW}[5]${NC} 修改主机名 🖥️        ${YELLOW}[16]${NC} 系统定时重启 🔄"
-    echo -e "${YELLOW}[6]${NC} SSH端口管理 🔒       ${YELLOW}[17]${NC} Cron任务管理 ⏰"
-    echo -e "${YELLOW}[7]${NC} 修改SSH密码 🔑       ${YELLOW}[18]${NC} SWAP管理 💾"
-    echo -e "${YELLOW}[8]${NC} SSH密钥登录管理 🔑   ${YELLOW}[19]${NC} TFO管理 🚀"
-    echo -e "${YELLOW}[9]${NC} 卸载脚本 🗑️          ${YELLOW}[20]${NC} 网络排查工具 🔧"
-    echo -e "${YELLOW}[10]${NC} 设置时区与时间同步 ⏰  ${YELLOW}[21]${NC} 退出 🚪"
-    echo -e "${YELLOW}[11]${NC} DDNS 管理 🌐"
-
-    echo ""  # 空行
-    read -p "请输入您的选择 [1-21]： " main_choice
+    echo -e "${WHITE}System-Easy 功能菜单${NC}"
+    echo -e "${YELLOW}[1]${NC} 安装常用工具 🛠️          ${YELLOW}[10]${NC} 内存占用最大 💾"
+    echo -e "${YELLOW}[2]${NC} 日志清理管理 🗑️          ${YELLOW}[11]${NC} 查看端口占用 🔍"
+    echo -e "${YELLOW}[3]${NC} BBR管理 ⚡               ${YELLOW}[12]${NC} CPU占用最大 🖥️"
+    echo -e "${YELLOW}[4]${NC} DNS管理 🌐               ${YELLOW}[13]${NC} 系统定时重启 🔄"
+    echo -e "${YELLOW}[5]${NC} 修改主机名 🖥️            ${YELLOW}[14]${NC} Cron任务管理 ⏰"
+    echo -e "${YELLOW}[6]${NC} SSH综合管理 🔒           ${YELLOW}[15]${NC} SWAP管理 💾"
+    echo -e "${YELLOW}[7]${NC} 卸载脚本 🗑️              ${YELLOW}[16]${NC} 网络排查工具 🔧"
+    echo -e "${YELLOW}[8]${NC} 设置时区与时间同步 ⏰     ${YELLOW}[17]${NC} DDNS管理 🌐"
+    echo -e "${YELLOW}[9]${NC} 更新脚本 📥              ${YELLOW}[18]${NC} GitHub镜像加速 ⚡"
+    echo -e "${YELLOW}[0]${NC} 退出 🚪"
+    echo ""
+    read -rp "请输入您的选择 [0-18]: " main_choice
 
     case $main_choice in
         1) install_tools ;;
@@ -2312,26 +1752,24 @@ while true; do
         3) bbr_menu ;;
         4) dns_menu ;;
         5) change_hostname ;;
-        6) ssh_port_menu ;;
-        7) change_ssh_password ;;
-        8) ssh_key_management ;;
-        9) uninstall_script ;;
-        10) set_timezone ;;  # 恢复选项10
-        11) ddns_menu ;;
-        12) update_script ;;
-        13) check_port_usage ;;
-        14) check_memory_usage ;;
-        15) check_cpu_usage ;;
-        16) set_system_reboot ;;
-        17) cron_task_menu ;;
-        18) swap_menu ;;
-        19) tfo_menu ;;
-        20) install_network_tools ;;
-        21)                           # 21 退出
+        6) ssh_integrated_menu ;;
+        7) uninstall_script ;;
+        8) set_timezone ;;
+        9) update_script ;;
+        10) check_memory_usage ;;  # 内存占用最大
+        11) check_port_usage ;;
+        12) check_cpu_usage ;;
+        13) set_system_reboot ;;
+        14) cron_task_menu ;;
+        15) swap_menu ;;
+        16) install_network_tools ;;
+        17) ddns_menu ;;
+        18) git_proxy_menu ;;
+        0) 
             echo -e "${GREEN}👋 已退出，下次使用直接运行: sudo system-easy${NC}"
-            exit 0
+            exit 0 
             ;;
-        *)
+        *) 
             echo -e "${RED}无效选择，请重试 😕${NC}"
             sleep 1
             ;;

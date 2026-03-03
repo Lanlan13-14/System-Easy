@@ -3,12 +3,13 @@ set -e
 set -o pipefail
 
 #================================================================================
-# Linux 网络性能优化脚本（高延迟/大带宽场景）- 优化版
+# Linux 网络性能优化脚本（高延迟/大带宽场景）- 生产级优化版
 # 特性：
 # - 支持动态模式（基于内存自动计算）和固定模式（16M/24M/32M/48M/64M）
 # - 同时优化最高速率和最低抖动
 # - 使用 fq + bbr（内核版本决定bbr版本）
 # - 优化缓冲区管理和TSO/GSO设置
+# - 生产环境安全限制：TCP缓冲区上限为总内存的20%
 # 适用于 Debian / Ubuntu
 #================================================================================
 
@@ -39,6 +40,14 @@ SYSCTL_MARKER_START="# --- BEGIN Kernel Tuning by Script ---"
 SYSCTL_MARKER_END="# --- END Kernel Tuning by Script ---"
 LIMITS_MARKER_START="# --- BEGIN Ulimit Settings by Script ---"
 LIMITS_MARKER_END="# --- END Ulimit Settings by Script ---"
+
+# --- 生产环境安全限制配置 ---
+# TCP 缓冲区上限占总内存的最大比例 (10-25%，取中间值 20%)
+MEMORY_LIMIT_PERCENT=20
+# 最小安全缓冲区 (即使在低内存系统也不低于 16MB)
+MIN_SAFE_BUFFER=16777216
+# 最大安全缓冲区 (即使内存很大也不超过 1GB，避免极端情况)
+MAX_SAFE_BUFFER=1073741824
 
 # --- 固定模式预设 (缓冲区大小: 字节) ---
 declare -A FIXED_PRESETS
@@ -119,10 +128,44 @@ compare_kernel_version() {
     fi
 }
 
+# --- 基于内存比例的缓冲区限制函数 ---
+apply_memory_limit() {
+    local proposed_buffer=$1
+    local mem_total_kb
+    local mem_limit_bytes
+    local final_buffer
+    
+    # 获取总内存 (KB)
+    mem_total_kb=$(grep MemTotal /proc/meminfo | awk '{print $2}')
+    # 转换为字节并计算限制值 (内存的 MEMORY_LIMIT_PERCENT%)
+    mem_limit_bytes=$(( mem_total_kb * 1024 * MEMORY_LIMIT_PERCENT / 100 ))
+    
+    # 应用限制：取 proposed_buffer 和 mem_limit_bytes 的较小值
+    if [ "$proposed_buffer" -gt "$mem_limit_bytes" ]; then
+        final_buffer=$mem_limit_bytes
+        print_warn "缓冲区大小 $(human_readable "$proposed_buffer") 超过内存限制 ($(human_readable "$mem_limit_bytes"))，已自动调整为安全值"
+    else
+        final_buffer=$proposed_buffer
+    fi
+    
+    # 确保不低于最小值
+    if [ "$final_buffer" -lt "$MIN_SAFE_BUFFER" ]; then
+        final_buffer=$MIN_SAFE_BUFFER
+    fi
+    
+    # 确保不超过最大值
+    if [ "$final_buffer" -gt "$MAX_SAFE_BUFFER" ]; then
+        final_buffer=$MAX_SAFE_BUFFER
+        print_warn "缓冲区大小超过最大安全限制 ($(human_readable "$MAX_SAFE_BUFFER"))，已自动调整为安全值"
+    fi
+    
+    echo "$final_buffer"
+}
+
 # --- 显示菜单 ---
 show_menu() {
     clear
-    print_title "Linux 网络性能优化脚本"
+    print_title "Linux 网络性能优化脚本 (生产级)"
     echo -e "${BLUE}请选择优化模式:${NC}"
     echo -e "[1] 动态模式 (基于系统内存自动计算最优值)"
     echo -e "[2] 固定模式 (从预设缓冲区大小中选择)"
@@ -312,7 +355,6 @@ if [ "$mode" = "dynamic" ]; then
         strategy="ultra_10g_plus"
     fi
 
-    declare -A sysctl_values
     declare ulimit_n
     declare base_tcp_buf
 
@@ -362,25 +404,14 @@ if [ "$mode" = "dynamic" ]; then
         band_based_buf=$(awk "BEGIN{printf \"%d\", $max_band_bps * $factor}")
         
         local target=$(( base_buf > band_based_buf ? base_buf : band_based_buf ))
-        local max_limit=1073741824
         
-        if [ "$strategy" = "ultra_10g_plus" ]; then
-            max_limit=2147483648
-        fi
-        
-        if (( target > max_limit )); then
-            target=$max_limit
-        fi
-        
-        if (( target < 16384 )); then
-            target=16384
-        fi
+        # 应用内存比例限制
+        target=$(apply_memory_limit "$target")
         
         echo "$target"
     }
 
     FINAL_MAX_BUF=$(calc_final_max_buf "$base_tcp_buf" "$down_bps" "$up_bps")
-    FINAL_MAX_BUF=$(awk "BEGIN{printf \"%d\", $FINAL_MAX_BUF * 1.1}")
     
     print_step "动态模式计算完成"
     print_step "内存大小: ${mem_total_mb}MB, 策略: $strategy"
@@ -438,109 +469,175 @@ else
                 ;;
         esac
     done
+    
+    # 固定模式也要应用内存比例限制
+    FINAL_MAX_BUF=$(apply_memory_limit "$FINAL_MAX_BUF")
 fi
 
 # --- 抖动优化参数 ---
 print_step "配置抖动优化参数..."
 
-# 核心抖动控制参数
-JITTER_OPTIMIZATIONS=(
-    # 减少调度延迟
-    ["kernel.sched_min_granularity_ns"]="10000000"
-    ["kernel.sched_wakeup_granularity_ns"]="15000000"
-    ["kernel.sched_migration_cost_ns"]="5000000"
-    
-    # IRQ平衡优化
-    ["kernel.numa_balancing"]="0"
-    ["kernel.timer_migration"]="0"
-    
-    # 网络中断控制
-    ["net.core.dev_weight"]="64"
-    ["net.core.dev_weight_tx"]="32"
-    
-    # RPS/RFS优化（如果支持）
-    ["net.core.rps_sock_flow_entries"]="32768"
+# 核心抖动控制参数 - 使用普通数组存储键值对
+JITTER_KEYS=(
+    "kernel.sched_min_granularity_ns"
+    "kernel.sched_wakeup_granularity_ns"
+    "kernel.sched_migration_cost_ns"
+    "kernel.numa_balancing"
+    "kernel.timer_migration"
+    "net.core.dev_weight"
+    "net.core.dev_weight_tx"
+    "net.core.rps_sock_flow_entries"
 )
 
-# --- 核心优化参数 ---
-sysctl_values=(
+JITTER_VALUES=(
+    "10000000"
+    "15000000"
+    "5000000"
+    "0"
+    "0"
+    "64"
+    "32"
+    "32768"
+)
+
+# --- 核心优化参数 - 使用普通数组存储键值对 ---
+# 注意: 移除了历史遗留的 tcp_low_latency 参数
+CORE_KEYS=(
     # 基础队列优化
-    ["net.core.somaxconn"]="65535"
-    ["net.ipv4.tcp_max_syn_backlog"]="65535"
-    ["net.core.netdev_max_backlog"]="65535"
-    ["net.core.optmem_max"]="25165824"
+    "net.core.somaxconn"
+    "net.ipv4.tcp_max_syn_backlog"
+    "net.core.netdev_max_backlog"
+    "net.core.optmem_max"
 
     # 缓冲区设置
-    ["net.core.rmem_max"]="$FINAL_MAX_BUF"
-    ["net.core.wmem_max"]="$FINAL_MAX_BUF"
-    ["net.core.rmem_default"]="$((FINAL_MAX_BUF / 4))"
-    ["net.core.wmem_default"]="$((FINAL_MAX_BUF / 4))"
-    ["net.ipv4.tcp_rmem"]="4096 $((FINAL_MAX_BUF / 2)) $FINAL_MAX_BUF"
-    ["net.ipv4.tcp_wmem"]="4096 $((FINAL_MAX_BUF / 2)) $FINAL_MAX_BUF"
+    "net.core.rmem_max"
+    "net.core.wmem_max"
+    "net.core.rmem_default"
+    "net.core.wmem_default"
+    "net.ipv4.tcp_rmem"
+    "net.ipv4.tcp_wmem"
 
     # TCP 快速路径优化
-    ["net.ipv4.tcp_fin_timeout"]="15"
-    ["net.ipv4.tcp_keepalive_time"]="300"
-    ["net.ipv4.tcp_keepalive_intvl"]="30"
-    ["net.ipv4.tcp_keepalive_probes"]="3"
-    ["net.ipv4.tcp_tw_reuse"]="1"
-    ["net.ipv4.tcp_timestamps"]="1"
-    ["net.ipv4.tcp_sack"]="1"
-    ["net.ipv4.tcp_dsack"]="1"
-    ["net.ipv4.tcp_slow_start_after_idle"]="0"
+    "net.ipv4.tcp_fin_timeout"
+    "net.ipv4.tcp_keepalive_time"
+    "net.ipv4.tcp_keepalive_intvl"
+    "net.ipv4.tcp_keepalive_probes"
+    "net.ipv4.tcp_tw_reuse"
+    "net.ipv4.tcp_timestamps"
+    "net.ipv4.tcp_sack"
+    "net.ipv4.tcp_dsack"
+    "net.ipv4.tcp_slow_start_after_idle"
     
-    # 降低延迟的参数
-    ["net.ipv4.tcp_low_latency"]="1"
-    ["net.ipv4.tcp_notsent_lowat"]="16384"
-    ["net.ipv4.tcp_mtu_probing"]="1"
-    ["net.ipv4.tcp_early_retrans"]="3"
-    ["net.ipv4.tcp_thin_linear_timeouts"]="1"
-    ["net.ipv4.tcp_autocorking"]="0"
+    # 降低延迟的参数 (移除了tcp_low_latency)
+    "net.ipv4.tcp_notsent_lowat"
+    "net.ipv4.tcp_mtu_probing"
+    "net.ipv4.tcp_early_retrans"
+    "net.ipv4.tcp_thin_linear_timeouts"
+    "net.ipv4.tcp_autocorking"
     
-    # 队列和拥塞控制 - 统一使用bbr（内核决定版本）
-    ["net.ipv4.tcp_congestion_control"]="bbr"
-    ["net.core.default_qdisc"]="fq"
+    # 队列和拥塞控制
+    "net.ipv4.tcp_congestion_control"
+    "net.core.default_qdisc"
 
     # TCP Fast Open
-    ["net.ipv4.tcp_fastopen"]="3"
+    "net.ipv4.tcp_fastopen"
 
-    # RACK (Recent ACKnowledgment) - 减少重传延迟
-    ["net.ipv4.tcp_rack_ident_enabled"]="1"
-    ["net.ipv4.tcp_recovery"]="1"
+    # RACK (Recent ACKnowledgment)
+    "net.ipv4.tcp_rack_ident_enabled"
+    "net.ipv4.tcp_recovery"
     
     # 安全与稳定性
-    ["net.ipv4.conf.all.accept_redirects"]="0"
-    ["net.ipv4.conf.all.send_redirects"]="0"
-    ["net.ipv6.conf.all.accept_redirects"]="0"
-    ["net.ipv4.conf.all.accept_source_route"]="0"
-    ["net.ipv4.tcp_syncookies"]="1"
+    "net.ipv4.conf.all.accept_redirects"
+    "net.ipv4.conf.all.send_redirects"
+    "net.ipv6.conf.all.accept_redirects"
+    "net.ipv4.conf.all.accept_source_route"
+    "net.ipv4.tcp_syncookies"
     
     # 内存与调度
-    ["vm.swappiness"]="10"
-    ["vm.vfs_cache_pressure"]="50"
-    ["vm.dirty_ratio"]="30"
-    ["vm.dirty_background_ratio"]="5"
-    ["vm.dirty_expire_centisecs"]="3000"
-    ["vm.dirty_writeback_centisecs"]="500"
+    "vm.swappiness"
+    "vm.vfs_cache_pressure"
+    "vm.dirty_ratio"
+    "vm.dirty_background_ratio"
+    "vm.dirty_expire_centisecs"
+    "vm.dirty_writeback_centisecs"
+    
+    # 文件句柄和inotify
+    "fs.inotify.max_user_watches"
+    "fs.inotify.max_user_instances"
 )
 
-# --- 添加抖动优化参数（如果内核支持）---
-for key in "${!JITTER_OPTIMIZATIONS[@]}"; do
-    if check_kernel_feature "$key"; then
-        sysctl_values["$key"]="${JITTER_OPTIMIZATIONS[$key]}"
-    fi
-done
+CORE_VALUES=(
+    # 基础队列优化
+    "65535"
+    "65535"
+    "65535"
+    "25165824"
+
+    # 缓冲区设置
+    "$FINAL_MAX_BUF"
+    "$FINAL_MAX_BUF"
+    "$((FINAL_MAX_BUF / 4))"
+    "$((FINAL_MAX_BUF / 4))"
+    "4096 $((FINAL_MAX_BUF / 2)) $FINAL_MAX_BUF"
+    "4096 $((FINAL_MAX_BUF / 2)) $FINAL_MAX_BUF"
+
+    # TCP 快速路径优化
+    "15"
+    "300"
+    "30"
+    "3"
+    "1"
+    "1"
+    "1"
+    "1"
+    "0"
+    
+    # 降低延迟的参数
+    "16384"
+    "1"
+    "3"
+    "1"
+    "0"
+    
+    # 队列和拥塞控制
+    "bbr"
+    "fq"
+
+    # TCP Fast Open
+    "3"
+
+    # RACK
+    "1"
+    "1"
+    
+    # 安全与稳定性
+    "0"
+    "0"
+    "0"
+    "0"
+    "1"
+    
+    # 内存与调度
+    "10"
+    "50"
+    "30"
+    "5"
+    "3000"
+    "500"
+    
+    # 文件句柄和inotify
+    "524288"
+    "512"
+)
 
 # --- 文件句柄调整 ---
 current_file_max=$(sysctl -n fs.file-max 2>/dev/null || echo 0)
 target_file_max=$(( ulimit_n * 10 ))
 if (( current_file_max < target_file_max )); then
-    sysctl_values["fs.file-max"]="$target_file_max"
+    # 动态添加文件句柄设置
+    CORE_KEYS+=("fs.file-max")
+    CORE_VALUES+=("$target_file_max")
 fi
-
-# --- 增加 inotify 限制 ---
-sysctl_values["fs.inotify.max_user_watches"]="524288"
-sysctl_values["fs.inotify.max_user_instances"]="512"
 
 # --- 尝试加载 BBR 模块（如果支持）---
 if [ "$BBR_SUPPORTED" = true ] && [ "$BBR_AVAILABLE" = false ]; then
@@ -553,11 +650,23 @@ if [ "$BBR_SUPPORTED" = true ] && [ "$BBR_AVAILABLE" = false ]; then
         echo "tcp_bbr" > /etc/modules-load.d/bbr.conf
     else
         print_warn "BBR 模块加载失败，将使用默认拥塞算法"
-        sysctl_values["net.ipv4.tcp_congestion_control"]="cubic"
+        # 更新拥塞控制算法设置
+        for i in "${!CORE_KEYS[@]}"; do
+            if [[ "${CORE_KEYS[$i]}" == "net.ipv4.tcp_congestion_control" ]]; then
+                CORE_VALUES[$i]="cubic"
+                break
+            fi
+        done
     fi
 elif [ "$BBR_SUPPORTED" = false ]; then
     print_warn "内核版本过低，BBR 不可用，将使用 cubic"
-    sysctl_values["net.ipv4.tcp_congestion_control"]="cubic"
+    # 更新拥塞控制算法设置
+    for i in "${!CORE_KEYS[@]}"; do
+        if [[ "${CORE_KEYS[$i]}" == "net.ipv4.tcp_congestion_control" ]]; then
+            CORE_VALUES[$i]="cubic"
+            break
+        fi
+    done
 fi
 
 # --- 配置中断平衡建议（非强制）---
@@ -575,8 +684,23 @@ fi
 
 # --- 应用配置到临时文件 ---
 : > "$TEMP_SYSCTL_FILE"
-for key in "${!sysctl_values[@]}"; do
-    apply_sysctl_value "$key" "${sysctl_values[$key]}"
+
+# 应用抖动优化参数
+print_step "应用抖动优化参数..."
+for i in "${!JITTER_KEYS[@]}"; do
+    key="${JITTER_KEYS[$i]}"
+    value="${JITTER_VALUES[$i]}"
+    if check_kernel_feature "$key"; then
+        apply_sysctl_value "$key" "$value"
+    fi
+done
+
+# 应用核心优化参数
+print_step "应用核心优化参数..."
+for i in "${!CORE_KEYS[@]}"; do
+    key="${CORE_KEYS[$i]}"
+    value="${CORE_VALUES[$i]}"
+    apply_sysctl_value "$key" "$value"
 done
 
 # 写入 sysctl 配置文件
@@ -591,6 +715,7 @@ print_step "正在写入内核配置文件: $SYSCTL_CONF_FILE"
         echo "# 用户输入带宽: down=${down_mbps:-N/A}Mbps up=${up_mbps:-N/A}Mbps"
     fi
     echo "# 最终缓冲区大小: $(human_readable "$FINAL_MAX_BUF") ($FINAL_MAX_BUF bytes)"
+    echo "# 内存安全限制: ${MEMORY_LIMIT_PERCENT}% of total RAM ($(human_readable "$((mem_total_kb * 1024 * MEMORY_LIMIT_PERCENT / 100))"))"
     echo "# 抖动优化: 已启用"
     echo "# BBR状态: $BBR_MSG"
     echo "# RACK支持: $(check_kernel_feature net.ipv4.tcp_rack_ident_enabled && echo "是" || echo "否")"
@@ -636,6 +761,7 @@ echo -e "优化模式      : ${GREEN}$mode${NC}"
 echo -e "应用策略      : ${GREEN}$strategy${NC}"
 echo -e "内核版本      : ${YELLOW}$(uname -r)${NC}"
 echo -e "缓冲区大小    : ${YELLOW}$(human_readable "$FINAL_MAX_BUF") ($FINAL_MAX_BUF bytes)${NC}"
+echo -e "内存安全限制  : ${YELLOW}${MEMORY_LIMIT_PERCENT}% (Max: $(human_readable "$((mem_total_kb * 1024 * MEMORY_LIMIT_PERCENT / 100))"))${NC}"
 echo -e "文件描述符限制: ${YELLOW}$ulimit_n${NC}"
 echo
 echo -e "${CYAN}【网络优化状态】${NC}"
@@ -648,7 +774,6 @@ echo -e "RACK 支持     : ${GREEN}$(check_kernel_feature net.ipv4.tcp_rack_iden
 echo
 echo -e "${CYAN}【抖动优化措施】${NC}"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo -e "✓ TCP 低延迟模式: 已启用"
 echo -e "✓ 调度器优化: 已应用"
 echo -e "✓ 自动 corking: 已禁用"
 echo -e "✓ 精简超时: 已优化"
@@ -666,5 +791,6 @@ echo "1. 重新登录 SSH 后 ulimit 才会完全生效"
 echo "2. 建议监控重传率: netstat -s | grep retrans"
 echo "3. 查看队列延迟: tc -s qdisc show"
 echo "4. 生产环境建议先在测试环境验证"
+echo "5. 缓冲区大小已受内存比例限制保护 (${MEMORY_LIMIT_PERCENT}%)，避免OOM风险"
 echo
 print_title "脚本执行完成"

@@ -1263,15 +1263,15 @@ uninstall_script() {
 
 # 功能8：设置时区与时间同步
 set_timezone() {
-    # 定义颜色变量
-    local RED='\033[0;31m'
-    local GREEN='\033[0;32m'
-    local YELLOW='\033[1;33m'
-    local BLUE='\033[0;34m'
-    local PURPLE='\033[0;35m'
-    local CYAN='\033[0;36m'
-    local WHITE='\033[0;37m'
-    local NC='\033[0m' # No Color
+    # 定义颜色变量（使用$'...'格式，最稳写法）
+    local RED=$'\033[0;31m'
+    local GREEN=$'\033[0;32m'
+    local YELLOW=$'\033[1;33m'
+    local BLUE=$'\033[0;34m'
+    local PURPLE=$'\033[0;35m'
+    local CYAN=$'\033[0;36m'
+    local WHITE=$'\033[0;37m'
+    local NC=$'\033[0m' # No Color
     
     while true; do
         clear
@@ -1308,41 +1308,41 @@ set_timezone() {
             ntp_sync_status="${RED}不可用${NC}"
         fi
         
-        cat <<EOF
-${CYAN}========== 时区与时间同步 ==========${NC}
-${CYAN}当前时区:${NC} $(timedatectl show --property=Timezone --value 2>/dev/null || echo '无法获取')
-${CYAN}当前时间:${NC} $(date '+%Y-%m-%d %H:%M:%S %Z')
-${CYAN}NTP服务状态:${NC} $ntp_status
-${CYAN}NTP同步状态:${NC} $ntp_sync_status
-${CYAN}时间偏差:${NC} $time_offset
-${CYAN}上次偏差:${NC} $last_offset
-
-${GREEN}[1]${NC} 设置系统时区
-${GREEN}[2]${NC} 配置NTP时间同步
-${YELLOW}[3]${NC} 禁用NTP时间同步
-${GREEN}[4]${NC} 立即进行时间同步
-${GREEN}[5]${NC} 查看NTP同步状态
-${RED}[0]${NC} 返回主菜单
-${CYAN}=====================================${NC}
-EOF
+        # 主界面 - 使用echo -e而不是cat <<EOF
+        echo -e "${CYAN}========== 时区与时间同步 ==========${NC}"
+        echo -e "${CYAN}当前时区:${NC} $(timedatectl show --property=Timezone --value 2>/dev/null || echo '无法获取')"
+        echo -e "${CYAN}当前时间:${NC} $(date '+%Y-%m-%d %H:%M:%S %Z')"
+        echo -e "${CYAN}NTP服务状态:${NC} $ntp_status"
+        echo -e "${CYAN}NTP同步状态:${NC} $ntp_sync_status"
+        echo -e "${CYAN}时间偏差:${NC} $time_offset"
+        echo -e "${CYAN}上次偏差:${NC} $last_offset"
+        echo ""
+        echo -e "${GREEN}[1]${NC} 设置系统时区"
+        echo -e "${GREEN}[2]${NC} 配置NTP时间同步"
+        echo -e "${YELLOW}[3]${NC} 禁用NTP时间同步"
+        echo -e "${GREEN}[4]${NC} 立即进行时间同步"
+        echo -e "${GREEN}[5]${NC} 查看NTP同步状态"
+        echo -e "${RED}[0]${NC} 返回主菜单"
+        echo -e "${CYAN}=====================================${NC}"
         read -rp "请选择 [0-5]: " tz_choice
+        
         case $tz_choice in
             1)
                 echo -e "${GREEN}请选择时区：${NC}"
-                echo "${GREEN}[1]${NC} UTC"
-                echo "${GREEN}[2]${NC} Asia/Shanghai (上海)"
-                echo "${GREEN}[3]${NC} Asia/Hong_Kong (香港)"
-                echo "${GREEN}[4]${NC} Asia/Taipei (台北)"
-                echo "${GREEN}[5]${NC} Asia/Tokyo (东京)"
-                echo "${GREEN}[6]${NC} Asia/Singapore (新加坡)"
-                echo "${GREEN}[7]${NC} America/New_York (纽约)"
-                echo "${GREEN}[8]${NC} Europe/London (伦敦)"
-                echo "${GREEN}[9]${NC} 手动输入"
+                echo -e "${GREEN}[1]${NC} UTC"
+                echo -e "${GREEN}[2]${NC} Asia/Shanghai (上海)"
+                echo -e "${GREEN}[3]${NC} Asia/Hong_Kong (香港)"
+                echo -e "${GREEN}[4]${NC} Asia/Taipei (台北)"
+                echo -e "${GREEN}[5]${NC} Asia/Tokyo (东京)"
+                echo -e "${GREEN}[6]${NC} Asia/Singapore (新加坡)"
+                echo -e "${GREEN}[7]${NC} America/New_York (纽约)"
+                echo -e "${GREEN}[8]${NC} Europe/London (伦敦)"
+                echo -e "${GREEN}[9]${NC} 手动输入"
                 read -rp "请选择 [1-9]: " tz_sub
                 case $tz_sub in
                     1) timedatectl set-timezone UTC ;;
                     2) timedatectl set-timezone Asia/Shanghai ;;
-                    3) timededctl set-timezone Asia/Hong_Kong ;;
+                    3) timedatectl set-timezone Asia/Hong_Kong ;;  # 修复拼写错误
                     4) timedatectl set-timezone Asia/Taipei ;;
                     5) timedatectl set-timezone Asia/Tokyo ;;
                     6) timedatectl set-timezone Asia/Singapore ;;
@@ -1383,36 +1383,36 @@ EOF
                 echo ""
                 echo -e "${YELLOW}请选择NTP服务器（可多选，用空格分隔，例如：1 3 5）：${NC}"
                 echo ""
-                echo "${GREEN}【中国地区】${NC}"
-                echo "  ${GREEN}[1]${NC} ntp.ntsc.ac.cn    (国家授时中心)"
-                echo "  ${GREEN}[2]${NC} ntp.cnnic.cn      (中国互联网信息中心)"
-                echo "  ${GREEN}[3]${NC} cn.ntp.org.cn     (中国NTP快速授时)"
-                echo "  ${GREEN}[4]${NC} ntp.aliyun.com    (阿里云)"
-                echo "  ${GREEN}[5]${NC} ntp.tencent.com   (腾讯云)"
-                echo "  ${GREEN}[6]${NC} cn.pool.ntp.org   (中国池)"
+                echo -e "${GREEN}【中国地区】${NC}"
+                echo -e "  ${GREEN}[1]${NC} ntp.ntsc.ac.cn    (国家授时中心)"
+                echo -e "  ${GREEN}[2]${NC} ntp.cnnic.cn      (中国互联网信息中心)"
+                echo -e "  ${GREEN}[3]${NC} cn.ntp.org.cn     (中国NTP快速授时)"
+                echo -e "  ${GREEN}[4]${NC} ntp.aliyun.com    (阿里云)"
+                echo -e "  ${GREEN}[5]${NC} ntp.tencent.com   (腾讯云)"
+                echo -e "  ${GREEN}[6]${NC} cn.pool.ntp.org   (中国池)"
                 echo ""
-                echo "${GREEN}【国际通用】${NC}"
-                echo "  ${GREEN}[7]${NC} pool.ntp.org      (国际池)"
-                echo "  ${GREEN}[8]${NC} 0.pool.ntp.org    (池0)"
-                echo "  ${GREEN}[9]${NC} 1.pool.ntp.org    (池1)"
-                echo "  ${GREEN}[10]${NC} 2.pool.ntp.org    (池2)"
-                echo "  ${GREEN}[11]${NC} 3.pool.ntp.org    (池3)"
+                echo -e "${GREEN}【国际通用】${NC}"
+                echo -e "  ${GREEN}[7]${NC} pool.ntp.org      (国际池)"
+                echo -e "  ${GREEN}[8]${NC} 0.pool.ntp.org    (池0)"
+                echo -e "  ${GREEN}[9]${NC} 1.pool.ntp.org    (池1)"
+                echo -e "  ${GREEN}[10]${NC} 2.pool.ntp.org    (池2)"
+                echo -e "  ${GREEN}[11]${NC} 3.pool.ntp.org    (池3)"
                 echo ""
-                echo "${GREEN}【科技公司】${NC}"
-                echo "  ${GREEN}[12]${NC} time1.google.com  (Google 1)"
-                echo "  ${GREEN}[13]${NC} time2.google.com  (Google 2)"
-                echo "  ${GREEN}[14]${NC} time3.google.com  (Google 3)"
-                echo "  ${GREEN}[15]${NC} time4.google.com  (Google 4)"
-                echo "  ${GREEN}[16]${NC} time1.apple.com   (Apple 1)"
-                echo "  ${GREEN}[17]${NC} time2.apple.com   (Apple 2)"
-                echo "  ${GREEN}[18]${NC} time3.apple.com   (Apple 3)"
-                echo "  ${GREEN}[19]${NC} time4.apple.com   (Apple 4)"
-                echo "  ${GREEN}[20]${NC} time.cloudflare.com (Cloudflare)"
-                echo "  ${GREEN}[21]${NC} time.windows.com  (Microsoft)"
+                echo -e "${GREEN}【科技公司】${NC}"
+                echo -e "  ${GREEN}[12]${NC} time1.google.com  (Google 1)"
+                echo -e "  ${GREEN}[13]${NC} time2.google.com  (Google 2)"
+                echo -e "  ${GREEN}[14]${NC} time3.google.com  (Google 3)"
+                echo -e "  ${GREEN}[15]${NC} time4.google.com  (Google 4)"
+                echo -e "  ${GREEN}[16]${NC} time1.apple.com   (Apple 1)"
+                echo -e "  ${GREEN}[17]${NC} time2.apple.com   (Apple 2)"
+                echo -e "  ${GREEN}[18]${NC} time3.apple.com   (Apple 3)"
+                echo -e "  ${GREEN}[19]${NC} time4.apple.com   (Apple 4)"
+                echo -e "  ${GREEN}[20]${NC} time.cloudflare.com (Cloudflare)"
+                echo -e "  ${GREEN}[21]${NC} time.windows.com  (Microsoft)"
                 echo ""
-                echo "${GREEN}【其他】${NC}"
-                echo "  ${GREEN}[22]${NC} 手动输入服务器"
-                echo "  ${GREEN}[23]${NC} 恢复默认配置 (pool.ntp.org)"
+                echo -e "${GREEN}【其他】${NC}"
+                echo -e "  ${GREEN}[22]${NC} 手动输入服务器"
+                echo -e "  ${GREEN}[23]${NC} 恢复默认配置 (pool.ntp.org)"
                 echo ""
                 read -rp "请输入选项 [1-23] (默认: 1 4 5 7): " ntp_options
                 
@@ -1544,7 +1544,7 @@ EOF
                 echo -e "${GREEN}同步策略：偏差超过1秒立即校正${NC}"
                 echo -e "${CYAN}已选择的服务器：${NC}"
                 for s in "${servers[@]}"; do
-                    echo "  ${GREEN}✓${NC} $s"
+                    echo -e "  ${GREEN}✓${NC} $s"
                 done
                 
                 sleep 2

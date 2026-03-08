@@ -1265,35 +1265,75 @@ uninstall_script() {
 set_timezone() {
     while true; do
         clear
+        # 检查chrony是否安装
+        local chrony_installed=false
+        if command -v chronyd >/dev/null 2>&1 || command -v chronyc >/dev/null 2>&1; then
+            chrony_installed=true
+        fi
+        
+        # 获取NTP状态
+        local ntp_status="未安装"
+        local ntp_sync_status="未知"
+        
+        if $chrony_installed; then
+            if systemctl is-active --quiet chronyd 2>/dev/null; then
+                ntp_status="运行中"
+                # 检查是否已同步
+                if chronyc tracking 2>/dev/null | grep -q "Leap status.*Normal"; then
+                    ntp_sync_status="${GREEN}已同步${NC}"
+                else
+                    ntp_sync_status="${YELLOW}未同步${NC}"
+                fi
+            else
+                ntp_status="已安装但未运行"
+                ntp_sync_status="${YELLOW}未同步${NC}"
+            fi
+        else
+            ntp_status="${RED}未安装 chrony${NC}"
+            ntp_sync_status="${RED}不可用${NC}"
+        fi
+        
         cat <<EOF
 ========== 时区与时间同步 ==========
 当前时区: $(timedatectl show --property=Timezone --value 2>/dev/null || echo '无法获取')
 当前时间: $(date '+%Y-%m-%d %H:%M:%S %Z')
-NTP状态: $(timedatectl show --property=NTPSynchronized --value 2>/dev/null | grep -q 'yes' && echo '已同步' || echo '未同步')
+NTP服务状态: $ntp_status
+NTP同步状态: $ntp_sync_status
 
 [1] 设置系统时区
-[2] 启用/配置NTP时间同步
+[2] 配置NTP时间同步
 [3] 禁用NTP时间同步
 [4] 立即进行时间同步
+[5] 查看NTP同步状态
 [0] 返回主菜单
 =====================================
 EOF
-        read -rp "请选择 [0-4]: " tz_choice
+        read -rp "请选择 [0-5]: " tz_choice
         case $tz_choice in
             1)
                 echo "请选择时区："
                 echo "[1] UTC"
-                echo "[2] Asia/Shanghai"
-                echo "[3] America/New_York"
-                echo "[4] 手动输入"
-                read -rp "请选择 [1-4]: " tz_sub
+                echo "[2] Asia/Shanghai (上海)"
+                echo "[3] Asia/Hong_Kong (香港)"
+                echo "[4] Asia/Taipei (台北)"
+                echo "[5] Asia/Tokyo (东京)"
+                echo "[6] Asia/Singapore (新加坡)"
+                echo "[7] America/New_York (纽约)"
+                echo "[8] Europe/London (伦敦)"
+                echo "[9] 手动输入"
+                read -rp "请选择 [1-9]: " tz_sub
                 case $tz_sub in
                     1) timedatectl set-timezone UTC ;;
                     2) timedatectl set-timezone Asia/Shanghai ;;
-                    3) timedatectl set-timezone America/New_York ;;
-                    4)
+                    3) timedatectl set-timezone Asia/Hong_Kong ;;
+                    4) timedatectl set-timezone Asia/Taipei ;;
+                    5) timedatectl set-timezone Asia/Tokyo ;;
+                    6) timedatectl set-timezone Asia/Singapore ;;
+                    7) timedatectl set-timezone America/New_York ;;
+                    8) timedatectl set-timezone Europe/London ;;
+                    9)
                         read -rp "请输入时区（如 Europe/London）: " custom_tz
-                        timedatectl set-timezone "$custom_tz" 2>/dev/null || echo -e "${RED}设置失败${NC}"
+                        timedatectl set-timezone "$custom_tz" 2>/dev/null || echo -e "${RED}设置失败，时区格式错误${NC}"
                         ;;
                     *) echo -e "${RED}无效选择${NC}"; sleep 2; continue ;;
                 esac
@@ -1302,57 +1342,244 @@ EOF
                 read -rp "按回车键继续..." _
                 ;;
             2)
-                echo "正在启用NTP时间同步..."
-                ensure_command chronyd chrony
-                echo "请选择NTP服务器："
-                echo "[1] ntp.ntsc.ac.cn"
-                echo "[2] ntp.tencent.com"
-                echo "[3] ntp.aliyun.com"
-                echo "[4] pool.ntp.org (默认)"
-                echo "[5] 手动输入"
-                read -rp "请选择 [1-5] (默认4): " ntp_choice
-                ntp_choice=${ntp_choice:-4}
-                case $ntp_choice in
-                    1) servers=("ntp.ntsc.ac.cn") ;;
-                    2) servers=("ntp.tencent.com") ;;
-                    3) servers=("ntp.aliyun.com") ;;
-                    4) servers=("0.pool.ntp.org" "1.pool.ntp.org" "2.pool.ntp.org" "3.pool.ntp.org") ;;
-                    5)
-                        read -rp "请输入NTP服务器（多个用空格分隔）: " -a servers
-                        ;;
-                    *) echo -e "${RED}无效选择${NC}"; sleep 2; continue ;;
-                esac
+                # 检查并安装chrony
+                if ! $chrony_installed; then
+                    echo "正在安装chrony时间同步服务..."
+                    if command -v apt >/dev/null 2>&1; then
+                        apt update && apt install -y chrony
+                    elif command -v yum >/dev/null 2>&1; then
+                        yum install -y chrony
+                    elif command -v dnf >/dev/null 2>&1; then
+                        dnf install -y chrony
+                    elif command -v zypper >/dev/null 2>&1; then
+                        zypper install -y chrony
+                    else
+                        echo -e "${RED}无法安装chrony，不支持的包管理器${NC}"
+                        read -rp "按回车键继续..." _
+                        continue
+                    fi
+                    chrony_installed=true
+                fi
+                
+                echo "正在配置NTP时间同步..."
+                echo "同步策略：偏差超过1秒立即校正"
+                echo ""
+                echo "请选择NTP服务器（可多选，用空格分隔，例如：1 3 5）："
+                echo ""
+                echo "【中国地区】"
+                echo "[1] ntp.ntsc.ac.cn    (国家授时中心)"
+                echo "[2] ntp.cnnic.cn      (中国互联网信息中心)"
+                echo "[3] cn.ntp.org.cn     (中国NTP快速授时)"
+                echo "[4] ntp.aliyun.com    (阿里云)"
+                echo "[5] ntp.tencent.com   (腾讯云)"
+                echo "[6] cn.pool.ntp.org   (中国池)"
+                echo ""
+                echo "【国际通用】"
+                echo "[7] pool.ntp.org      (国际池)"
+                echo "[8] 0.pool.ntp.org    (池0)"
+                echo "[9] 1.pool.ntp.org    (池1)"
+                echo "[10] 2.pool.ntp.org    (池2)"
+                echo "[11] 3.pool.ntp.org    (池3)"
+                echo ""
+                echo "【科技公司】"
+                echo "[12] time1.google.com  (Google 1)"
+                echo "[13] time2.google.com  (Google 2)"
+                echo "[14] time3.google.com  (Google 3)"
+                echo "[15] time4.google.com  (Google 4)"
+                echo "[16] time1.apple.com   (Apple 1)"
+                echo "[17] time2.apple.com   (Apple 2)"
+                echo "[18] time3.apple.com   (Apple 3)"
+                echo "[19] time4.apple.com   (Apple 4)"
+                echo "[20] time.cloudflare.com (Cloudflare)"
+                echo "[21] time.windows.com  (Microsoft)"
+                echo ""
+                echo "【其他】"
+                echo "[22] 手动输入服务器"
+                echo "[23] 恢复默认配置 (pool.ntp.org)"
+                echo ""
+                read -rp "请输入选项 [1-23] (默认: 1 4 5 7): " ntp_options
+                
+                # 设置默认选项
+                if [ -z "$ntp_options" ]; then
+                    ntp_options="1 4 5 7"
+                fi
+                
+                # 处理手动输入
+                if [[ "$ntp_options" == "22" ]]; then
+                    echo "请输入NTP服务器地址（每行一个，输入空行结束）："
+                    servers=()
+                    while IFS= read -rp "> " line; do
+                        [[ -z "$line" ]] && break
+                        servers+=("$line iburst")
+                    done
+                    if [ ${#servers[@]} -eq 0 ]; then
+                        echo -e "${YELLOW}未输入服务器，使用默认配置${NC}"
+                        servers=(
+                            "ntp.ntsc.ac.cn iburst"
+                            "ntp.aliyun.com iburst"
+                            "ntp.tencent.com iburst"
+                            "pool.ntp.org iburst"
+                        )
+                    fi
+                elif [[ "$ntp_options" == "23" ]]; then
+                    # 恢复默认配置
+                    servers=(
+                        "0.pool.ntp.org iburst"
+                        "1.pool.ntp.org iburst"
+                        "2.pool.ntp.org iburst"
+                        "3.pool.ntp.org iburst"
+                    )
+                else
+                    # 将用户输入的选项转换为服务器列表
+                    declare -A ntp_servers=(
+                        [1]="ntp.ntsc.ac.cn"
+                        [2]="ntp.cnnic.cn"
+                        [3]="cn.ntp.org.cn"
+                        [4]="ntp.aliyun.com"
+                        [5]="ntp.tencent.com"
+                        [6]="cn.pool.ntp.org"
+                        [7]="pool.ntp.org"
+                        [8]="0.pool.ntp.org"
+                        [9]="1.pool.ntp.org"
+                        [10]="2.pool.ntp.org"
+                        [11]="3.pool.ntp.org"
+                        [12]="time1.google.com"
+                        [13]="time2.google.com"
+                        [14]="time3.google.com"
+                        [15]="time4.google.com"
+                        [16]="time1.apple.com"
+                        [17]="time2.apple.com"
+                        [18]="time3.apple.com"
+                        [19]="time4.apple.com"
+                        [20]="time.cloudflare.com"
+                        [21]="time.windows.com"
+                    )
+                    
+                    servers=()
+                    for opt in $ntp_options; do
+                        if [[ -n "${ntp_servers[$opt]}" ]]; then
+                            servers+=("${ntp_servers[$opt]} iburst")
+                        fi
+                    done
+                    
+                    # 去重（保留顺序）
+                    servers=($(printf "%s\n" "${servers[@]}" | awk '!seen[$0]++'))
+                fi
+                
+                # 备份原有配置
+                if [ -f /etc/chrony/chrony.conf ]; then
+                    cp /etc/chrony/chrony.conf /etc/chrony/chrony.conf.bak.$(date +%Y%m%d%H%M%S)
+                fi
+                
+                # 创建新的配置文件（配置快速同步：偏差超过1秒立即校正）
                 cat > /etc/chrony/chrony.conf <<EOF
-$(for s in "${servers[@]}"; do echo "server $s iburst"; done)
+# 由系统管理脚本自动生成
+# 生成时间: $(date '+%Y-%m-%d %H:%M:%S')
+# 同步策略：偏差超过1秒立即校正
+# 服务器列表:
+$(printf '# %s\n' "${servers[@]}" | sed 's/ iburst//')
+
+$(printf '%s\n' "${servers[@]}")
+
+# 指定密钥文件
 keyfile /etc/chrony/chrony.keys
+
+# 指定漂移文件
 driftfile /var/lib/chrony/chrony.drift
+
+# 日志目录
 logdir /var/log/chrony
+
+# 最大时钟偏差更新斜率
 maxupdateskew 100.0
+
+# 启用硬件时钟同步
 rtcsync
-makestep 1.0 3
+
+# 偏差超过1秒立即校正（-1表示永久有效）
+makestep 1.0 -1
+
+# 轮询间隔设置（更快的初始同步）
+minpoll 3
+maxpoll 6
+
+# 允许NTP客户端访问（如果需要）
+#allow 127.0.0.1
+#local stratum 10
 EOF
+
+                # 启用并启动服务
                 systemctl enable chronyd >/dev/null 2>&1
                 systemctl restart chronyd
+                
                 echo -e "${GREEN}NTP服务已配置并启动${NC}"
+                echo -e "${GREEN}同步策略：偏差超过1秒立即校正${NC}"
+                echo -e "已选择的服务器："
+                for s in "${servers[@]}"; do
+                    echo "  - $s"
+                done
+                
                 sleep 2
+                # 尝试立即同步
                 chronyc -a makestep >/dev/null 2>&1
+                
                 echo "当前时间: $(date '+%Y-%m-%d %H:%M:%S %Z')"
                 read -rp "按回车键继续..." _
                 ;;
             3)
-                systemctl stop chronyd 2>/dev/null
-                systemctl disable chronyd 2>/dev/null
+                if systemctl is-active --quiet chronyd 2>/dev/null; then
+                    systemctl stop chronyd
+                    systemctl disable chronyd
+                fi
                 timedatectl set-ntp false 2>/dev/null
                 echo -e "${GREEN}NTP已禁用${NC}"
                 read -rp "按回车键继续..." _
                 ;;
             4)
-                if systemctl is-active --quiet chronyd; then
+                if systemctl is-active --quiet chronyd 2>/dev/null; then
+                    echo "正在进行时间同步..."
                     chronyc -a makestep >/dev/null 2>&1
                     sleep 2
                     echo "当前时间: $(date '+%Y-%m-%d %H:%M:%S %Z')"
+                    
+                    # 显示同步状态
+                    if chronyc tracking 2>/dev/null | grep -q "Leap status.*Normal"; then
+                        echo -e "${GREEN}时间已同步${NC}"
+                    else
+                        echo -e "${YELLOW}正在同步中...${NC}"
+                    fi
                 else
-                    echo -e "${YELLOW}chronyd 未运行${NC}"
+                    if $chrony_installed; then
+                        echo -e "${YELLOW}chronyd 未运行，请先启动服务${NC}"
+                        systemctl start chronyd
+                        echo "正在启动chronyd..."
+                        sleep 2
+                    else
+                        echo -e "${RED}chrony 未安装，请先安装${NC}"
+                    fi
+                fi
+                read -rp "按回车键继续..." _
+                ;;
+            5)
+                if $chrony_installed && systemctl is-active --quiet chronyd 2>/dev/null; then
+                    echo "========== NTP同步状态 =========="
+                    echo "时间源信息："
+                    chronyc sources -v
+                    echo ""
+                    echo "同步详情："
+                    chronyc tracking
+                    
+                    # 显示当前同步策略
+                    echo ""
+                    echo "当前同步策略："
+                    grep -E "makestep|minpoll|maxpoll" /etc/chrony/chrony.conf 2>/dev/null || echo "未配置特殊策略"
+                    
+                    # 显示服务器延迟统计
+                    echo ""
+                    echo "服务器延迟统计："
+                    chronyc sourcestats -v 2>/dev/null | head -20
+                else
+                    echo -e "${RED}chrony服务未运行或未安装${NC}"
                 fi
                 read -rp "按回车键继续..." _
                 ;;

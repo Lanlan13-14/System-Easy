@@ -1273,6 +1273,69 @@ set_timezone() {
     local WHITE=$'\033[0;37m'
     local NC=$'\033[0m' # No Color
     
+    # 定义NTP服务器列表（全局，供延迟测试使用）
+    local -A ntp_servers=(
+        [1]="ntp.ntsc.ac.cn|国家授时中心"
+        [2]="ntp.cnnic.cn|中国互联网信息中心"
+        [3]="cn.ntp.org.cn|中国NTP快速授时"
+        [4]="ntp.aliyun.com|阿里云"
+        [5]="ntp.tencent.com|腾讯云"
+        [6]="cn.pool.ntp.org|中国池"
+        [7]="pool.ntp.org|国际池"
+        [8]="0.pool.ntp.org|池0"
+        [9]="1.pool.ntp.org|池1"
+        [10]="2.pool.ntp.org|池2"
+        [11]="3.pool.ntp.org|池3"
+        [12]="time1.google.com|Google 1"
+        [13]="time2.google.com|Google 2"
+        [14]="time3.google.com|Google 3"
+        [15]="time4.google.com|Google 4"
+        [16]="time1.apple.com|Apple 1"
+        [17]="time2.apple.com|Apple 2"
+        [18]="time3.apple.com|Apple 3"
+        [19]="time4.apple.com|Apple 4"
+        [20]="time.cloudflare.com|Cloudflare"
+        [21]="time.windows.com|Microsoft"
+    )
+    
+    # 测试NTP服务器延迟的函数
+    test_ntp_delay() {
+        local server=$1
+        local timeout=2
+        
+        # 方法1：使用chronyd测试（最准确）
+        if command -v chronyd >/dev/null 2>&1; then
+            local result=$(timeout $timeout chronyd -Q "server $server iburst" 2>&1 | grep "offset" | awk '{print $2}')
+            if [ -n "$result" ]; then
+                # 转换为毫秒并取绝对值
+                local ms=$(echo "$result" | sed 's/s//' | awk '{printf "%.0f", sqrt($1*$1)*1000}')
+                echo "$ms"
+                return
+            fi
+        fi
+        
+        # 方法2：使用ping测试（备选）
+        if command -v ping >/dev/null 2>&1; then
+            local ping_result=$(ping -c 2 -W 1 $server 2>/dev/null | tail -1 | awk -F '/' '{print $5}' | cut -d'.' -f1)
+            if [ -n "$ping_result" ] && [ "$ping_result" -eq "$ping_result" ] 2>/dev/null; then
+                echo "$ping_result"
+                return
+            fi
+        fi
+        
+        # 方法3：使用ntpdate测试
+        if command -v ntpdate >/dev/null 2>&1; then
+            local result=$(timeout $timeout ntpdate -q $server 2>&1 | grep "offset" | awk '{print $10}' | sed 's/://')
+            if [ -n "$result" ]; then
+                local ms=$(echo "$result" | awk '{printf "%.0f", sqrt($1*$1)}')
+                echo "$ms"
+                return
+            fi
+        fi
+        
+        echo "999"  # 超时或不可达
+    }
+    
     while true; do
         clear
         # 检查chrony是否安装
@@ -1308,7 +1371,7 @@ set_timezone() {
             ntp_sync_status="${RED}不可用${NC}"
         fi
         
-        # 主界面 - 使用echo -e而不是cat <<EOF
+        # 主界面
         echo -e "${CYAN}========== 时区与时间同步 ==========${NC}"
         echo -e "${CYAN}当前时区:${NC} $(timedatectl show --property=Timezone --value 2>/dev/null || echo '无法获取')"
         echo -e "${CYAN}当前时间:${NC} $(date '+%Y-%m-%d %H:%M:%S %Z')"
@@ -1342,7 +1405,7 @@ set_timezone() {
                 case $tz_sub in
                     1) timedatectl set-timezone UTC ;;
                     2) timedatectl set-timezone Asia/Shanghai ;;
-                    3) timedatectl set-timezone Asia/Hong_Kong ;;  # 修复拼写错误
+                    3) timedatectl set-timezone Asia/Hong_Kong ;;
                     4) timedatectl set-timezone Asia/Taipei ;;
                     5) timedatectl set-timezone Asia/Tokyo ;;
                     6) timedatectl set-timezone Asia/Singapore ;;
@@ -1378,135 +1441,121 @@ set_timezone() {
                     chrony_installed=true
                 fi
                 
-                echo -e "${GREEN}正在配置NTP时间同步...${NC}"
-                echo -e "${CYAN}同步策略：偏差超过1秒立即校正${NC}"
+                echo -e "${GREEN}正在测试NTP服务器延迟...${NC}"
+                echo -e "${YELLOW}这可能需要几秒钟时间...${NC}"
                 echo ""
-                echo -e "${YELLOW}请选择NTP服务器（可多选，用空格分隔，例如：1 3 5）：${NC}"
-                echo ""
-                echo -e "${GREEN}【中国地区】${NC}"
-                echo -e "  ${GREEN}[1]${NC} ntp.ntsc.ac.cn    (国家授时中心)"
-                echo -e "  ${GREEN}[2]${NC} ntp.cnnic.cn      (中国互联网信息中心)"
-                echo -e "  ${GREEN}[3]${NC} cn.ntp.org.cn     (中国NTP快速授时)"
-                echo -e "  ${GREEN}[4]${NC} ntp.aliyun.com    (阿里云)"
-                echo -e "  ${GREEN}[5]${NC} ntp.tencent.com   (腾讯云)"
-                echo -e "  ${GREEN}[6]${NC} cn.pool.ntp.org   (中国池)"
-                echo ""
-                echo -e "${GREEN}【国际通用】${NC}"
-                echo -e "  ${GREEN}[7]${NC} pool.ntp.org      (国际池)"
-                echo -e "  ${GREEN}[8]${NC} 0.pool.ntp.org    (池0)"
-                echo -e "  ${GREEN}[9]${NC} 1.pool.ntp.org    (池1)"
-                echo -e "  ${GREEN}[10]${NC} 2.pool.ntp.org    (池2)"
-                echo -e "  ${GREEN}[11]${NC} 3.pool.ntp.org    (池3)"
-                echo ""
-                echo -e "${GREEN}【科技公司】${NC}"
-                echo -e "  ${GREEN}[12]${NC} time1.google.com  (Google 1)"
-                echo -e "  ${GREEN}[13]${NC} time2.google.com  (Google 2)"
-                echo -e "  ${GREEN}[14]${NC} time3.google.com  (Google 3)"
-                echo -e "  ${GREEN}[15]${NC} time4.google.com  (Google 4)"
-                echo -e "  ${GREEN}[16]${NC} time1.apple.com   (Apple 1)"
-                echo -e "  ${GREEN}[17]${NC} time2.apple.com   (Apple 2)"
-                echo -e "  ${GREEN}[18]${NC} time3.apple.com   (Apple 3)"
-                echo -e "  ${GREEN}[19]${NC} time4.apple.com   (Apple 4)"
-                echo -e "  ${GREEN}[20]${NC} time.cloudflare.com (Cloudflare)"
-                echo -e "  ${GREEN}[21]${NC} time.windows.com  (Microsoft)"
-                echo ""
-                echo -e "${GREEN}【其他】${NC}"
-                echo -e "  ${GREEN}[22]${NC} 手动输入服务器"
-                echo -e "  ${GREEN}[23]${NC} 恢复默认配置 (pool.ntp.org)"
-                echo ""
-                read -rp "请输入选项 [1-23] (默认: 1 4 5 7): " ntp_options
                 
-                # 设置默认选项
-                if [ -z "$ntp_options" ]; then
-                    ntp_options="1 4 5 7"
+                # 创建临时文件存储测试结果
+                local tmp_results=$(mktemp)
+                
+                # 测试所有服务器的延迟
+                local total=${#ntp_servers[@]}
+                local current=0
+                
+                for key in $(echo "${!ntp_servers[@]}" | tr ' ' '\n' | sort -n); do
+                    current=$((current + 1))
+                    IFS='|' read -r server desc <<< "${ntp_servers[$key]}"
+                    
+                    # 显示进度
+                    printf "\r${CYAN}正在测试 [%2d/%d]: %-30s${NC}" $current $total "$server"
+                    
+                    # 测试延迟
+                    local delay=$(test_ntp_delay "$server")
+                    echo "$key:$delay:$server:$desc" >> "$tmp_results"
+                done
+                echo -e "\n"
+                
+                # 按延迟排序并显示结果
+                echo -e "${GREEN}NTP服务器延迟测试结果（按延迟排序）：${NC}"
+                echo -e "${CYAN}-------------------------------------------------------------------------${NC}"
+                printf "${GREEN}%-4s %-30s %-20s %-10s${NC}\n" "编号" "服务器" "描述" "延迟(ms)"
+                echo -e "${CYAN}-------------------------------------------------------------------------${NC}"
+                
+                # 按延迟排序（排除999的放在最后）
+                local sorted_results=$(sort -t':' -k2 -n "$tmp_results" | grep -v ":999:")
+                local failed_results=$(grep ":999:" "$tmp_results")
+                
+                # 显示正常结果
+                local display_num=1
+                declare -A display_map
+                
+                while IFS= read -r line; do
+                    [ -z "$line" ] && continue
+                    IFS=':' read -r key delay server desc <<< "$line"
+                    
+                    # 根据延迟显示颜色
+                    if [ "$delay" -lt 20 ]; then
+                        local color="${GREEN}"
+                    elif [ "$delay" -lt 50 ]; then
+                        local color="${YELLOW}"
+                    else
+                        local color="${RED}"
+                    fi
+                    
+                    printf "${color}[%2d]${NC} %-30s %-20s ${color}%4d ms${NC}\n" "$display_num" "$server" "$desc" "$delay"
+                    display_map[$display_num]="$key:$server"  # 保存映射关系
+                    display_num=$((display_num + 1))
+                done <<< "$sorted_results"
+                
+                # 显示失败的服务器
+                while IFS= read -r line; do
+                    [ -z "$line" ] && continue
+                    IFS=':' read -r key delay server desc <<< "$line"
+                    printf "${RED}[%2d]${NC} %-30s %-20s ${RED}超时/不可达${NC}\n" "$display_num" "$server" "$desc"
+                    display_map[$display_num]="$key:$server"
+                    display_num=$((display_num + 1))
+                done <<< "$failed_results"
+                
+                echo -e "${CYAN}-------------------------------------------------------------------------${NC}"
+                echo ""
+                
+                # 用户选择
+                echo -e "${YELLOW}请选择要使用的NTP服务器（可多选，用空格分隔，例如：1 3 5）：${NC}"
+                echo -e "${GREEN}提示：建议选择2-4个延迟最低的服务器${NC}"
+                read -rp "请输入选项 (默认: 1 2 3): " selected_options
+                
+                if [ -z "$selected_options" ]; then
+                    selected_options="1 2 3"
                 fi
                 
-                # 处理手动输入
-                if [[ "$ntp_options" == "22" ]]; then
-                    echo -e "${CYAN}请输入NTP服务器地址（每行一个，输入空行结束）：${NC}"
-                    servers=()
-                    while IFS= read -rp "> " line; do
-                        [[ -z "$line" ]] && break
-                        servers+=("$line iburst")
-                    done
-                    if [ ${#servers[@]} -eq 0 ]; then
-                        echo -e "${YELLOW}未输入服务器，使用默认配置${NC}"
-                        servers=(
-                            "ntp.ntsc.ac.cn iburst"
-                            "ntp.aliyun.com iburst"
-                            "ntp.tencent.com iburst"
-                            "pool.ntp.org iburst"
-                        )
+                # 构建服务器列表（正确的格式）
+                servers=()
+                for opt in $selected_options; do
+                    if [[ -n "${display_map[$opt]}" ]]; then
+                        IFS=':' read -r key server <<< "${display_map[$opt]}"
+                        # 正确的格式：server xxx.xxx.xxx iburst minpoll 3 maxpoll 6
+                        servers+=("server $server iburst minpoll 3 maxpoll 6")
                     fi
-                elif [[ "$ntp_options" == "23" ]]; then
-                    # 恢复默认配置
+                done
+                
+                # 清理临时文件
+                rm -f "$tmp_results"
+                
+                # 如果没有选择任何服务器，使用默认
+                if [ ${#servers[@]} -eq 0 ]; then
+                    echo -e "${YELLOW}未选择有效服务器，使用默认配置${NC}"
                     servers=(
-                        "0.pool.ntp.org iburst"
-                        "1.pool.ntp.org iburst"
-                        "2.pool.ntp.org iburst"
-                        "3.pool.ntp.org iburst"
+                        "server ntp.ntsc.ac.cn iburst minpoll 3 maxpoll 6"
+                        "server ntp.aliyun.com iburst minpoll 3 maxpoll 6"
+                        "server ntp.tencent.com iburst minpoll 3 maxpoll 6"
+                        "server pool.ntp.org iburst minpoll 3 maxpoll 6"
                     )
-                else
-                    # 将用户输入的选项转换为服务器列表
-                    declare -A ntp_servers=(
-                        [1]="ntp.ntsc.ac.cn"
-                        [2]="ntp.cnnic.cn"
-                        [3]="cn.ntp.org.cn"
-                        [4]="ntp.aliyun.com"
-                        [5]="ntp.tencent.com"
-                        [6]="cn.pool.ntp.org"
-                        [7]="pool.ntp.org"
-                        [8]="0.pool.ntp.org"
-                        [9]="1.pool.ntp.org"
-                        [10]="2.pool.ntp.org"
-                        [11]="3.pool.ntp.org"
-                        [12]="time1.google.com"
-                        [13]="time2.google.com"
-                        [14]="time3.google.com"
-                        [15]="time4.google.com"
-                        [16]="time1.apple.com"
-                        [17]="time2.apple.com"
-                        [18]="time3.apple.com"
-                        [19]="time4.apple.com"
-                        [20]="time.cloudflare.com"
-                        [21]="time.windows.com"
-                    )
-                    
-                    servers=()
-                    for opt in $ntp_options; do
-                        if [[ -n "${ntp_servers[$opt]}" ]]; then
-                            servers+=("${ntp_servers[$opt]} iburst")
-                        fi
-                    done
-                    
-                    # 去重（保留顺序）
-                    if [ ${#servers[@]} -gt 0 ]; then
-                        servers=($(printf "%s\n" "${servers[@]}" | awk '!seen[$0]++'))
-                    else
-                        echo -e "${YELLOW}未选择有效服务器，使用默认配置${NC}"
-                        servers=(
-                            "ntp.ntsc.ac.cn iburst"
-                            "ntp.aliyun.com iburst"
-                            "ntp.tencent.com iburst"
-                            "pool.ntp.org iburst"
-                        )
-                    fi
                 fi
                 
                 # 备份原有配置
                 if [ -f /etc/chrony/chrony.conf ]; then
-                    cp /etc/chrony/chrony.conf /etc/chrony/chrony.conf.bak.$(date +%Y%m%d%H%M%S)
-                    echo -e "${GREEN}原配置已备份为 chrony.conf.bak.$(date +%Y%m%d%H%M%S)${NC}"
+                    local backup_file="/etc/chrony/chrony.conf.bak.$(date +%Y%m%d%H%M%S)"
+                    cp /etc/chrony/chrony.conf "$backup_file"
+                    echo -e "${GREEN}原配置已备份为 $(basename $backup_file)${NC}"
                 fi
                 
-                # 创建新的配置文件
+                # 创建新的配置文件（正确的格式）
                 cat > /etc/chrony/chrony.conf <<EOF
 # 由系统管理脚本自动生成
 # 生成时间: $(date '+%Y-%m-%d %H:%M:%S')
 # 同步策略：偏差超过1秒立即校正
-# 服务器列表:
-$(printf '# %s\n' "${servers[@]}" | sed 's/ iburst//')
 
+# 服务器配置（自动选择，带轮询间隔）
 $(printf '%s\n' "${servers[@]}")
 
 # 指定密钥文件
@@ -1527,21 +1576,26 @@ rtcsync
 # 偏差超过1秒立即校正（-1表示永久有效）
 makestep 1.0 -1
 
-# 轮询间隔设置
-minpoll 3
-maxpoll 6
-
 # 允许NTP客户端访问（如果需要）
 #allow 127.0.0.1
 #local stratum 10
 EOF
 
+                # 验证配置文件语法
+                echo -e "${CYAN}正在验证配置文件语法...${NC}"
+                if chronyd -Q -q -t 1 >/dev/null 2>&1; then
+                    echo -e "${GREEN}配置文件语法正确${NC}"
+                else
+                    echo -e "${YELLOW}警告：配置文件语法验证失败，请检查配置${NC}"
+                fi
+                
                 # 启用并启动服务
                 systemctl enable chronyd >/dev/null 2>&1
                 systemctl restart chronyd
                 
                 echo -e "${GREEN}NTP服务已配置并启动${NC}"
                 echo -e "${GREEN}同步策略：偏差超过1秒立即校正${NC}"
+                echo -e "${GREEN}轮询间隔：minpoll 3 (8秒), maxpoll 6 (64秒)${NC}"
                 echo -e "${CYAN}已选择的服务器：${NC}"
                 for s in "${servers[@]}"; do
                     echo -e "  ${GREEN}✓${NC} $s"
@@ -1626,11 +1680,7 @@ EOF
                     
                     echo -e "${CYAN}【当前同步策略】${NC}"
                     local makestep=$(grep -E "^makestep" /etc/chrony/chrony.conf 2>/dev/null | head -1 || echo "未配置")
-                    local minpoll=$(grep -E "^minpoll" /etc/chrony/chrony.conf 2>/dev/null | head -1 || echo "未配置")
-                    local maxpoll=$(grep -E "^maxpoll" /etc/chrony/chrony.conf 2>/dev/null | head -1 || echo "未配置")
                     echo "  同步策略: $makestep"
-                    echo "  最小轮询: $minpoll"
-                    echo "  最大轮询: $maxpoll"
                     echo ""
                     
                     echo -e "${CYAN}【服务器延迟统计】${NC}"

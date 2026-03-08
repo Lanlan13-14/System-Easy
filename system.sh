@@ -1263,6 +1263,16 @@ uninstall_script() {
 
 # 功能8：设置时区与时间同步
 set_timezone() {
+    # 定义颜色变量
+    local RED='\033[0;31m'
+    local GREEN='\033[0;32m'
+    local YELLOW='\033[1;33m'
+    local BLUE='\033[0;34m'
+    local PURPLE='\033[0;35m'
+    local CYAN='\033[0;36m'
+    local WHITE='\033[0;37m'
+    local NC='\033[0m' # No Color
+    
     while true; do
         clear
         # 检查chrony是否安装
@@ -1274,6 +1284,8 @@ set_timezone() {
         # 获取NTP状态
         local ntp_status="未安装"
         local ntp_sync_status="未知"
+        local time_offset="未知"
+        local last_offset="未知"
         
         if $chrony_installed; then
             if systemctl is-active --quiet chronyd 2>/dev/null; then
@@ -1282,8 +1294,8 @@ set_timezone() {
                 if chronyc tracking 2>/dev/null | grep -q "Leap status.*Normal"; then
                     ntp_sync_status="${GREEN}已同步${NC}"
                     # 获取时间偏差信息
-                    local time_offset=$(chronyc tracking 2>/dev/null | grep "System time" | awk '{print $4$5}')
-                    local last_offset=$(chronyc tracking 2>/dev/null | grep "Last offset" | awk '{print $4$5}')
+                    time_offset=$(chronyc tracking 2>/dev/null | grep "System time" | awk '{print $4, $5, $6}')
+                    last_offset=$(chronyc tracking 2>/dev/null | grep "Last offset" | awk '{print $4, $5}')
                 else
                     ntp_sync_status="${YELLOW}未同步${NC}"
                 fi
@@ -1297,13 +1309,13 @@ set_timezone() {
         fi
         
         cat <<EOF
-========== 时区与时间同步 ==========
+${CYAN}========== 时区与时间同步 ==========${NC}
 ${CYAN}当前时区:${NC} $(timedatectl show --property=Timezone --value 2>/dev/null || echo '无法获取')
 ${CYAN}当前时间:${NC} $(date '+%Y-%m-%d %H:%M:%S %Z')
 ${CYAN}NTP服务状态:${NC} $ntp_status
 ${CYAN}NTP同步状态:${NC} $ntp_sync_status
-${CYAN}时间偏差:${NC} ${time_offset:-未知}
-${CYAN}上次偏差:${NC} ${last_offset:-未知}
+${CYAN}时间偏差:${NC} $time_offset
+${CYAN}上次偏差:${NC} $last_offset
 
 ${GREEN}[1]${NC} 设置系统时区
 ${GREEN}[2]${NC} 配置NTP时间同步
@@ -1311,12 +1323,12 @@ ${YELLOW}[3]${NC} 禁用NTP时间同步
 ${GREEN}[4]${NC} 立即进行时间同步
 ${GREEN}[5]${NC} 查看NTP同步状态
 ${RED}[0]${NC} 返回主菜单
-=====================================
+${CYAN}=====================================${NC}
 EOF
         read -rp "请选择 [0-5]: " tz_choice
         case $tz_choice in
             1)
-                echo "请选择时区："
+                echo -e "${GREEN}请选择时区：${NC}"
                 echo "${GREEN}[1]${NC} UTC"
                 echo "${GREEN}[2]${NC} Asia/Shanghai (上海)"
                 echo "${GREEN}[3]${NC} Asia/Hong_Kong (香港)"
@@ -1330,7 +1342,7 @@ EOF
                 case $tz_sub in
                     1) timedatectl set-timezone UTC ;;
                     2) timedatectl set-timezone Asia/Shanghai ;;
-                    3) timedatectl set-timezone Asia/Hong_Kong ;;
+                    3) timededctl set-timezone Asia/Hong_Kong ;;
                     4) timedatectl set-timezone Asia/Taipei ;;
                     5) timedatectl set-timezone Asia/Tokyo ;;
                     6) timedatectl set-timezone Asia/Singapore ;;
@@ -1343,13 +1355,13 @@ EOF
                     *) echo -e "${RED}无效选择${NC}"; sleep 2; continue ;;
                 esac
                 echo -e "${GREEN}时区已设置为: $(timedatectl show --property=Timezone --value)${NC}"
-                echo "当前时间: $(date '+%Y-%m-%d %H:%M:%S %Z')"
+                echo -e "当前时间: $(date '+%Y-%m-%d %H:%M:%S %Z')"
                 read -rp "按回车键继续..." _
                 ;;
             2)
                 # 检查并安装chrony
                 if ! $chrony_installed; then
-                    echo "正在安装chrony时间同步服务..."
+                    echo -e "${GREEN}正在安装chrony时间同步服务...${NC}"
                     if command -v apt >/dev/null 2>&1; then
                         apt update && apt install -y chrony
                     elif command -v yum >/dev/null 2>&1; then
@@ -1411,7 +1423,7 @@ EOF
                 
                 # 处理手动输入
                 if [[ "$ntp_options" == "22" ]]; then
-                    echo "请输入NTP服务器地址（每行一个，输入空行结束）："
+                    echo -e "${CYAN}请输入NTP服务器地址（每行一个，输入空行结束）：${NC}"
                     servers=()
                     while IFS= read -rp "> " line; do
                         [[ -z "$line" ]] && break
@@ -1468,7 +1480,17 @@ EOF
                     done
                     
                     # 去重（保留顺序）
-                    servers=($(printf "%s\n" "${servers[@]}" | awk '!seen[$0]++'))
+                    if [ ${#servers[@]} -gt 0 ]; then
+                        servers=($(printf "%s\n" "${servers[@]}" | awk '!seen[$0]++'))
+                    else
+                        echo -e "${YELLOW}未选择有效服务器，使用默认配置${NC}"
+                        servers=(
+                            "ntp.ntsc.ac.cn iburst"
+                            "ntp.aliyun.com iburst"
+                            "ntp.tencent.com iburst"
+                            "pool.ntp.org iburst"
+                        )
+                    fi
                 fi
                 
                 # 备份原有配置
@@ -1550,7 +1572,7 @@ EOF
                     # 获取同步后的状态
                     local current_time=$(date '+%Y-%m-%d %H:%M:%S %Z')
                     local sync_status=$(chronyc tracking 2>/dev/null | grep "Leap status" | cut -d':' -f2 | xargs)
-                    local system_offset=$(chronyc tracking 2>/dev/null | grep "System time" | awk '{print $4, $5}')
+                    local system_offset=$(chronyc tracking 2>/dev/null | grep "System time" | awk '{print $4, $5, $6}')
                     
                     echo -e "${GREEN}当前时间: $current_time${NC}"
                     
@@ -1589,13 +1611,12 @@ EOF
                                 echo -e " ${YELLOW}⚠${NC} $line"
                             fi
                         elif [[ "$line" == *"System time"* ]] || [[ "$line" == *"Last offset"* ]]; then
-                            # 提取数值并判断正负
                             if [[ "$line" == *"slow"* ]]; then
                                 echo -e " ${YELLOW}↓${NC} $line"
                             elif [[ "$line" == *"fast"* ]]; then
                                 echo -e " ${YELLOW}↑${NC} $line"
                             else
-                                echo -e "   $line"
+                                echo "   $line"
                             fi
                         else
                             echo "   $line"
@@ -1604,9 +1625,9 @@ EOF
                     echo ""
                     
                     echo -e "${CYAN}【当前同步策略】${NC}"
-                    local makestep=$(grep -E "^makestep" /etc/chrony/chrony.conf 2>/dev/null || echo "未配置")
-                    local minpoll=$(grep -E "^minpoll" /etc/chrony/chrony.conf 2>/dev/null || echo "未配置")
-                    local maxpoll=$(grep -E "^maxpoll" /etc/chrony/chrony.conf 2>/dev/null || echo "未配置")
+                    local makestep=$(grep -E "^makestep" /etc/chrony/chrony.conf 2>/dev/null | head -1 || echo "未配置")
+                    local minpoll=$(grep -E "^minpoll" /etc/chrony/chrony.conf 2>/dev/null | head -1 || echo "未配置")
+                    local maxpoll=$(grep -E "^maxpoll" /etc/chrony/chrony.conf 2>/dev/null | head -1 || echo "未配置")
                     echo "  同步策略: $makestep"
                     echo "  最小轮询: $minpoll"
                     echo "  最大轮询: $maxpoll"
@@ -1614,12 +1635,14 @@ EOF
                     
                     echo -e "${CYAN}【服务器延迟统计】${NC}"
                     chronyc sourcestats -v 2>/dev/null | head -20 | while IFS= read -r line; do
-                        if [[ "$line" == *"^*"* ]] || [[ "$line" == *"*"* ]] && [[ ! "$line" == *"Name/IP"* ]]; then
+                        if [[ "$line" == *"^*"* ]] && [[ ! "$line" == *"Name/IP"* ]]; then
                             echo -e " ${GREEN}★${NC} $line"
-                        elif [[ "$line" == *"^+"* ]] || [[ "$line" == *"+"* ]] && [[ ! "$line" == *"Name/IP"* ]]; then
+                        elif [[ "$line" == *"^+"* ]] && [[ ! "$line" == *"Name/IP"* ]]; then
                             echo -e " ${CYAN}✓${NC} $line"
-                        else
+                        elif [[ "$line" =~ ^[0-9] ]] || [[ "$line" =~ ^[a-zA-Z] ]]; then
                             echo "   $line"
+                        else
+                            echo "$line"
                         fi
                     done
                     

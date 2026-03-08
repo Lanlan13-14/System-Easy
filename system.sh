@@ -526,41 +526,71 @@ change_hostname() {
     current_hostname=$(hostname)
     echo "当前主机名：$current_hostname"
     read -rp "请输入新主机名： " new_hostname
+    
+    # 输入验证
     if [ -z "$new_hostname" ]; then
         echo -e "${RED}主机名不能为空${NC}"
         read -rp "按回车键返回主菜单..." _
         return
     fi
+    
+    # 额外验证：检查主机名格式（可选）
+    if ! echo "$new_hostname" | grep -qE '^[a-zA-Z0-9.-]+$'; then
+        echo -e "${RED}主机名包含非法字符（只允许字母、数字、点和连字符）${NC}"
+        read -rp "按回车键返回主菜单..." _
+        return
+    fi
+    
     echo "警告：此操作将永久更改主机名 ❗"
     
-    if grep -q "container=lxc" /proc/1/environ 2>/dev/null || [ -f /.lxc-boot-id ]; then
-        echo "检测到LXC容器环境，使用LXC兼容的主机名配置方式..."
-        if command -v hostnamectl &>/dev/null; then
-            hostnamectl set-hostname "$new_hostname"
-        else
-            echo "$new_hostname" > /etc/hostname
-        fi
-        if [ -f /etc/hosts ]; then
-            cp /etc/hosts /etc/hosts.backup.$(date +%Y%m%d%H%M%S)
-            sed -i "s/127.0.1.1\s*$current_hostname/127.0.1.1\t$new_hostname/g" /etc/hosts
-            sed -i "s/127.0.0.1\s*$current_hostname/127.0.0.1\t$new_hostname/g" /etc/hosts
-            if ! grep -q "127.0.1.1.*$new_hostname" /etc/hosts; then
-                echo "127.0.1.1\t$new_hostname" >> /etc/hosts
-            fi
-        fi
-        sysctl kernel.hostname="$new_hostname" 2>/dev/null || hostname "$new_hostname"
-        echo -e "${GREEN}LXC容器主机名已更改为 $new_hostname 🎉${NC}"
-    else
-        hostnamectl set-hostname "$new_hostname"
-        if [ -f /etc/hosts ]; then
-            cp /etc/hosts /etc/hosts.backup.$(date +%Y%m%d%H%M%S)
-            sed -i "s/127.0.1.1\s*$current_hostname/127.0.1.1\t$new_hostname/g" /etc/hosts
-            sed -i "s/127.0.0.1\s*$current_hostname/127.0.0.1\t$new_hostname/g" /etc/hosts
-        fi
-        echo -e "${GREEN}主机名已更改为 $new_hostname 🎉${NC}"
+    # 备份 /etc/hosts
+    if [ -f /etc/hosts ]; then
+        backup_file="/etc/hosts.backup.$(date +%Y%m%d%H%M%S)"
+        cp /etc/hosts "$backup_file"
+        echo "已备份 /etc/hosts 到 $backup_file"
     fi
-    echo "当前主机名：$(hostname)"
-    grep "$(hostname)" /etc/hosts 2>/dev/null || echo "未在hosts文件中找到当前主机名"
+
+    # 更新 /etc/hosts
+    # 删除旧主机名的所有映射（包括带点和带短横的变体）
+    sed -i "/[[:space:]]$current_hostname\([[:space:]]\|$\)/d" /etc/hosts
+    
+    # 确保 127.0.0.1 映射存在
+    if grep -q "^127.0.0.1[[:space:]]" /etc/hosts; then
+        # 在现有的 127.0.0.1 行添加新主机名
+        sed -i "s/^\(127.0.0.1[[:space:]]*.*\)/\1 $new_hostname/" /etc/hosts
+    else
+        # 添加新的 127.0.0.1 行
+        echo "127.0.0.1   localhost $new_hostname" >> /etc/hosts
+    fi
+    
+    # 确保 localhost 解析
+    if ! grep -q "^127.0.0.1[[:space:]]*localhost" /etc/hosts; then
+        echo "127.0.0.1   localhost" >> /etc/hosts
+    fi
+
+    # 修改 /etc/hostname
+    echo "$new_hostname" > /etc/hostname
+
+    # 修改内核主机名（立即生效）
+    hostname "$new_hostname"
+
+    # 同步 hostnamectl（如果可用）
+    if command -v hostnamectl &>/dev/null; then
+        hostnamectl set-hostname "$new_hostname"
+    fi
+
+    echo -e "${GREEN}主机名已成功更改为 $new_hostname 🎉${NC}"
+    echo "当前内核主机名：$(hostname)"
+    echo "当前 /etc/hostname：$(cat /etc/hostname)"
+    echo -e "\n/etc/hosts 中包含主机名的行："
+    grep "$new_hostname" /etc/hosts || echo "未找到"
+    
+    # 验证 sudo 是否正常工作
+    if command -v sudo &>/dev/null; then
+        echo -e "\n测试 sudo 解析："
+        sudo -V | head -n 1 || echo "sudo 可能有问题"
+    fi
+    
     read -rp "按回车键返回主菜单..." _
 }
 

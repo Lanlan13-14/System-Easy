@@ -29,6 +29,15 @@ curl -fsSL https://raw.githubusercontent.com/Lanlan13-14/System-Easy/refs/heads/
 ```
 #### 卸载DDNS脚本
 ##### 卸载选项在脚本中已提供
+#### 仅TCPING
+```
+sudo apt update && sudo apt install -y bc tcptraceroute && sudo wget -O /usr/bin/tcping https://raw.githubusercontent.com/Lanlan13-14/System-Easy/refs/heads/main/tcping.sh && sudo chmod +x /usr/bin/tcping
+```
+#### 卸载TCPING
+```
+sudo rm -f /usr/bin/tcping /usr/bin/tcping.sh && sudo apt remove -y bc tcptraceroute
+```
+
 ### 特别感谢
 [byJoey](https://github.com/byJoey/Actions-bbr-v3)
 >

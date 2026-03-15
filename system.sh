@@ -1323,10 +1323,9 @@ set_timezone() {
         [16]="time.apple.com|Apple 1"
         [17]="time.asia.apple.com|Apple 2"
         [18]="time.euro.apple.com|Apple 3"
-        [19]="time.aws.com|Amazon 1"
-        [20]="amazon.pool.ntp.org|Amazon 2"
-        [21]="time.cloudflare.com|Cloudflare"
-        [22]="time.windows.com|Microsoft"
+        [19]="amazon.pool.ntp.org|Amazon"
+        [20]="time.cloudflare.com|Cloudflare"
+        [21]="time.windows.com|Microsoft"
     )
     
     # 测试NTP服务器延迟的函数

@@ -5,6 +5,11 @@
 # 格式：
 # 名称|API_URL|目标|模式|端口|间隔(秒)
 # =========================
+# Tips
+# 保存至/usr/local/bin/kuma_multi_push.sh
+# 赋权 chmod +x /usr/local/bin/kuma_multi_push.sh
+# 运行 nohup /usr/local/bin/kuma_multi_push.sh > /dev/null 2>&1 &
+# 也可自行写systemd
 
 TASKS=(
 "<name>|https://example.com/api/push/<token>|<ip>|<icmp|tcping>|<port>|<time>"

@@ -10,6 +10,7 @@
 # 赋权 chmod +x /usr/local/bin/kuma_multi_push.sh
 # 运行 nohup /usr/local/bin/kuma_multi_push.sh > /dev/null 2>&1 &
 # 也可自行写systemd
+# tcping模式需要依赖主页有
 
 TASKS=(
 "<name>|https://example.com/api/push/<token>|<ip>|<icmp|tcping>|<port>|<time>"

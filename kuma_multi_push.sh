@@ -10,7 +10,8 @@
 # 赋权 chmod +x /usr/local/bin/kuma_multi_push.sh
 # 运行 nohup /usr/local/bin/kuma_multi_push.sh > /dev/null 2>&1 &
 # 也可自行写systemd
-# tcping模式需要依赖主页有
+# tcping模式需要依赖
+# sudo apt update && sudo apt install -y bc tcptraceroute && sudo wget -O /usr/bin/tcping https://raw.githubusercontent.com/Lanlan13-14/System-Easy/refs/heads/main/tcping.sh && sudo chmod +x /usr/bin/tcping
 
 TASKS=(
 "<name>|https://example.com/api/push/<token>|<ip>|<icmp|tcping>|<port>|<time>"

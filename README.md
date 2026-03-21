@@ -37,11 +37,14 @@ sudo apt update && sudo apt install -y bc tcptraceroute && sudo wget -O /usr/bin
 ```
 sudo rm -f /usr/bin/tcping /usr/bin/tcping.sh && sudo apt remove -y bc tcptraceroute
 ```
-#### Kuma ping
+#### 安装Kuma-ping
 ```
-sudo wget -O /usr/local/bin/kuma_multi_push.sh https://raw.githubusercontent.com/Lanlan13-14/System-Easy/refs/heads/main/kuma_multi_push.sh && sudo chmod +x /usr/local/bin/kuma_multi_push.sh && sudo ln -s /usr/local/bin/kuma_multi_push.sh /usr/local/bin/kuma-ping
+sudo wget -O /usr/local/bin/kuma_multi_push.sh https://raw.githubusercontent.com/Lanlan13-14/System-Easy/refs/heads/main/kuma_multi_push.sh && sudo chmod +x /usr/local/bin/kuma_multi_push.sh && sudo ln -s /usr/local/bin/kuma_multi_push.sh /usr/local/bin/kuma-ping && kuma-ping
 ```
-
+#### 卸载Kuma-ping
+```
+sudo rm -f /usr/local/bin/kuma_multi_push.sh /usr/local/bin/kuma-ping
+```
 ### 特别感谢
 [byJoey](https://github.com/byJoey/Actions-bbr-v3)
 >

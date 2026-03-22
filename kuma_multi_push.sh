@@ -37,22 +37,22 @@ save_config() {
 
 check_dependencies() {
     local missing=()
-    
+
     # 检查 bc
     if ! command -v bc &> /dev/null; then
         missing+=("bc")
     fi
-    
+
     # 检查 tcptraceroute
     if ! command -v tcptraceroute &> /dev/null; then
         missing+=("tcptraceroute")
     fi
-    
+
     # 检查 tcping
     if ! command -v tcping &> /dev/null; then
         missing+=("tcping")
     fi
-    
+
     if [ ${#missing[@]} -gt 0 ]; then
         echo "检测到缺少依赖: ${missing[*]}"
         install_dependencies
@@ -63,7 +63,7 @@ check_dependencies() {
 
 install_dependencies() {
     echo "开始安装依赖..."
-    
+
     # 检测系统包管理器
     if command -v apt &> /dev/null; then
         sudo apt update
@@ -75,14 +75,14 @@ install_dependencies() {
     else
         echo "无法自动安装依赖，请手动安装：bc 和 tcptraceroute"
     fi
-    
+
     # 安装 tcping 脚本
     if [ ! -f "/usr/bin/tcping" ]; then
         echo "安装 tcping 脚本..."
         sudo wget -O /usr/bin/tcping https://raw.githubusercontent.com/Lanlan13-14/System-Easy/refs/heads/main/tcping.sh
         sudo chmod +x /usr/bin/tcping
     fi
-    
+
     echo "依赖安装完成！"
 }
 
@@ -100,11 +100,11 @@ get_tcp_ping() {
         echo "tcping 未安装" >&2
         return 1
     fi
-    
+
     RESULT=$(tcping -p "$2" "$1" -c 3 2>/dev/null)
-    
+
     echo "$RESULT" | grep -q "round-trip" || return 1
-    
+
     echo "$RESULT" | \
     grep "round-trip" | \
     awk -F'=' '{print $2}' | \
@@ -119,7 +119,7 @@ get_tcp_ping() {
 setup_service() {
     # 获取当前脚本路径
     local script_path=$(readlink -f "$0")
-    
+
     # 创建 systemd 服务文件
     sudo tee "$SERVICE_FILE" > /dev/null << EOF
 [Unit]
@@ -152,6 +152,33 @@ disable_service() {
     sudo systemctl stop kuma-push.service
     sudo systemctl disable kuma-push.service
     echo "开机自启已禁用，服务已停止。"
+}
+
+start_service() {
+    if [ -f "$SERVICE_FILE" ]; then
+        sudo systemctl start kuma-push.service
+        echo "服务已启动。"
+    else
+        echo "服务未安装，请先设置开机自启动（选项6）。"
+    fi
+}
+
+stop_service() {
+    if [ -f "$SERVICE_FILE" ]; then
+        sudo systemctl stop kuma-push.service
+        echo "服务已停止。"
+    else
+        echo "服务未安装。"
+    fi
+}
+
+restart_service() {
+    if [ -f "$SERVICE_FILE" ]; then
+        sudo systemctl restart kuma-push.service
+        echo "服务已重启。"
+    else
+        echo "服务未安装，请先设置开机自启动（选项6）。"
+    fi
 }
 
 service_status() {
@@ -196,7 +223,7 @@ add_task() {
     load_config
     echo "添加新监控任务："
     echo "=============================="
-    
+
     read -p "监控名称: " name
     read -p "Kuma API地址: " api
     read -p "目标IP/域名: " target
@@ -205,35 +232,35 @@ add_task() {
         2) mode="tcping" ;;
         *) mode="icmp" ;;
     esac
-    
+
     port="0"
     if [ "$mode" = "tcping" ]; then
         read -p "TCP端口: " port
     fi
-    
+
     read -p "监控间隔(秒, 默认60): " interval
     interval=${interval:-60}
-    
+
     # 验证输入
     if [ -z "$name" ] || [ -z "$api" ] || [ -z "$target" ]; then
         echo "错误：名称、API地址和目标不能为空！"
         return 1
     fi
-    
+
     # 添加到配置
     local new_task="$name|$api|$target|$mode|$port|$interval"
     TASKS+=("$new_task")
     save_config
-    
+
     echo "任务添加成功！"
 }
 
 edit_task() {
     load_config
     list_tasks
-    
+
     read -p "请选择要编辑的任务编号: " choice
-    
+
     local i=1
     local valid_tasks=()
     for task in "${TASKS[@]}"; do
@@ -242,28 +269,28 @@ edit_task() {
             ((i++))
         fi
     done
-    
+
     if [ -z "${valid_tasks[$choice]}" ]; then
         echo "无效的选择！"
         return 1
     fi
-    
+
     local old_task="${valid_tasks[$choice]}"
     IFS='|' read -r name api target mode port interval <<< "$old_task"
-    
+
     echo "编辑任务 (直接回车保持不变):"
     echo "原名称: $name"
     read -p "新名称: " new_name
     name=${new_name:-$name}
-    
+
     echo "原API: $api"
     read -p "新API: " new_api
     api=${new_api:-$api}
-    
+
     echo "原目标: $target"
     read -p "新目标: " new_target
     target=${new_target:-$target}
-    
+
     echo "原模式: $mode"
     read -p "新模式 [1]icmp [2]tcping: " mode_choice
     if [ -n "$mode_choice" ]; then
@@ -272,7 +299,7 @@ edit_task() {
             1) mode="icmp" ;;
         esac
     fi
-    
+
     if [ "$mode" = "tcping" ]; then
         echo "原端口: $port"
         read -p "新端口: " new_port
@@ -280,11 +307,11 @@ edit_task() {
     else
         port="0"
     fi
-    
+
     echo "原间隔: ${interval}秒"
     read -p "新间隔: " new_interval
     interval=${new_interval:-$interval}
-    
+
     # 替换旧任务
     local new_task="$name|$api|$target|$mode|$port|$interval"
     for idx in "${!TASKS[@]}"; do
@@ -293,7 +320,7 @@ edit_task() {
             break
         fi
     done
-    
+
     save_config
     echo "任务编辑成功！"
 }
@@ -301,9 +328,9 @@ edit_task() {
 delete_task() {
     load_config
     list_tasks
-    
+
     read -p "请选择要删除的任务编号: " choice
-    
+
     local i=1
     local valid_indices=()
     for idx in "${!TASKS[@]}"; do
@@ -312,12 +339,12 @@ delete_task() {
             ((i++))
         fi
     done
-    
+
     if [ -z "${valid_indices[$choice]}" ]; then
         echo "无效的选择！"
         return 1
     fi
-    
+
     local idx=${valid_indices[$choice]}
     echo "确认删除任务: ${TASKS[$idx]%%|*}"
     read -p "确定删除？[y/N] " confirm
@@ -334,43 +361,43 @@ delete_task() {
 
 run_daemon() {
     echo "启动 Kuma 推送守护进程..."
-    
+
     # 检查依赖
     check_dependencies
-    
+
     declare -A LAST_RUN
-    
+
     while true; do
         NOW=$(date +%s)
         load_config
-        
+
         for TASK in "${TASKS[@]}"; do
             # 跳过注释和空行
             [[ "$TASK" =~ ^# ]] && continue
             [ -z "$TASK" ] && continue
-            
+
             IFS='|' read -r NAME API TARGET MODE PORT INTERVAL <<< "$TASK"
-            
+
             # 参数验证
             [ -z "$NAME" ] || [ -z "$API" ] || [ -z "$TARGET" ] && continue
-            
+
             LAST=${LAST_RUN["$NAME"]}
             [ -z "$LAST" ] && LAST=0
-            
+
             # 时间没到就跳过
             if (( NOW - LAST < INTERVAL )); then
                 continue
             fi
-            
+
             LAST_RUN["$NAME"]=$NOW
-            
+
             # 执行检测
             if [ "$MODE" = "icmp" ]; then
                 PING=$(get_icmp_ping "$TARGET")
             else
                 PING=$(get_tcp_ping "$TARGET" "$PORT")
             fi
-            
+
             # 状态判断
             if [ -n "$PING" ]; then
                 STATUS="up"
@@ -380,13 +407,13 @@ run_daemon() {
                 MSG="timeout"
                 PING=""
             fi
-            
+
             # 上报到 Kuma
             curl -s -o /dev/null "${API}?status=${STATUS}&msg=${MSG}&ping=${PING}"
-            
+
             echo "[$(date '+%F %T')] [$NAME] $TARGET $STATUS ${PING}ms"
         done
-        
+
         sleep 5
     done
 }
@@ -407,7 +434,10 @@ show_menu() {
     echo "[5] 检查/安装依赖"
     echo "[6] 设置开机自启动"
     echo "[7] 禁用开机自启动"
-    echo "[8] 查看服务状态"
+    echo "[8] 启动服务"
+    echo "[9] 停止服务"
+    echo "[10] 重启服务"
+    echo "[11] 查看服务状态"
     echo "[0] 退出"
     echo "====================================="
 }
@@ -424,8 +454,8 @@ case "$1" in
         # 交互式菜单
         while true; do
             show_menu
-            read -p "请选择操作 [0-8]: " choice
-            
+            read -p "请选择操作 [0-11]: " choice
+
             case $choice in
                 1) list_tasks && read -p "按回车键继续..." ;;
                 2) add_task && read -p "按回车键继续..." ;;
@@ -434,7 +464,10 @@ case "$1" in
                 5) check_dependencies && read -p "按回车键继续..." ;;
                 6) enable_service && read -p "按回车键继续..." ;;
                 7) disable_service && read -p "按回车键继续..." ;;
-                8) service_status && read -p "按回车键继续..." ;;
+                8) start_service && read -p "按回车键继续..." ;;
+                9) stop_service && read -p "按回车键继续..." ;;
+                10) restart_service && read -p "按回车键继续..." ;;
+                11) service_status && read -p "按回车键继续..." ;;
                 0) echo "再见！下次使用请输入kuma-ping"; exit 0 ;;
                 *) echo "无效选择！" && sleep 2 ;;
             esac

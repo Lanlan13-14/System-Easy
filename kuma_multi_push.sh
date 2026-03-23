@@ -113,6 +113,51 @@ get_tcp_ping() {
 }
 
 # =========================
+# 推送函数（带3次重试机制）
+# =========================
+
+push_to_kuma() {
+    local api="$1"
+    local status="$2"
+    local msg="$3"
+    local ping="$4"
+    local name="$5"
+    
+    local max_retries=3
+    local retry_delay=2
+    local timeout=10
+    local retry_count=0
+    
+    for retry_count in $(seq 1 $max_retries); do
+        # 使用 curl 推送，设置超时时间
+        if curl -s -f -o /dev/null \
+            --connect-timeout 5 \
+            --max-time $timeout \
+            "${api}?status=${status}&msg=${msg}&ping=${ping}" 2>/dev/null; then
+            
+            # 推送成功
+            if [ $retry_count -gt 1 ]; then
+                echo "[$(date '+%F %T')] [$name] 推送成功（第${retry_count}次尝试）"
+            fi
+            return 0
+        else
+            # 推送失败
+            if [ $retry_count -lt $max_retries ]; then
+                echo "[$(date '+%F %T')] [$name] 推送失败，${retry_delay}秒后重试（${retry_count}/${max_retries}）" >&2
+                sleep $retry_delay
+                # 指数退避，逐渐增加延迟
+                retry_delay=$((retry_delay * 2))
+            else
+                echo "[$(date '+%F %T')] [$name] 推送失败，已重试${max_retries}次" >&2
+                # 记录到失败日志文件
+                echo "[$(date '+%F %T')] [$name] 推送失败 API:${api} STATUS:${status} MSG:${msg} PING:${ping}" >> /var/log/kuma-push.errors.log 2>/dev/null
+                return 1
+            fi
+        fi
+    done
+}
+
+# =========================
 # 系统服务管理
 # =========================
 
@@ -361,12 +406,19 @@ delete_task() {
 
 run_daemon() {
     echo "启动 Kuma 推送守护进程..."
-
+    echo "日志文件: /var/log/kuma-push.log"
+    echo "错误日志: /var/log/kuma-push.errors.log"
+    
     # 检查依赖
     check_dependencies
-
+    
     declare -A LAST_RUN
-
+    local log_file="/var/log/kuma-push.log"
+    local error_log="/var/log/kuma-push.errors.log"
+    
+    # 创建日志文件（如果不存在）
+    touch "$log_file" "$error_log" 2>/dev/null || true
+    
     while true; do
         NOW=$(date +%s)
         load_config
@@ -408,10 +460,11 @@ run_daemon() {
                 PING=""
             fi
 
-            # 上报到 Kuma
-            curl -s -o /dev/null "${API}?status=${STATUS}&msg=${MSG}&ping=${PING}"
+            # 输出检测结果到日志
+            echo "[$(date '+%F %T')] [$NAME] 检测结果: $TARGET $STATUS ${PING}ms" >> "$log_file"
 
-            echo "[$(date '+%F %T')] [$NAME] $TARGET $STATUS ${PING}ms"
+            # 调用带重试的推送函数（3次重试）
+            push_to_kuma "$API" "$STATUS" "$MSG" "$PING" "$NAME"
         done
 
         sleep 5

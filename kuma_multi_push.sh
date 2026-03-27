@@ -2,7 +2,7 @@
 
 # =========================
 # Uptime Kuma 多节点监控推送脚本
-# 优化版：串行推送 + HTTP状态码检测 + 日志查看
+# 优化版：串行推送 + HTTP状态码检测 + 日志查看 + 日志清理
 # 保存至：/usr/local/bin/kuma-ping
 # 赋权：chmod +x /usr/local/bin/kuma-ping
 # =========================
@@ -13,10 +13,17 @@ SERVICE_FILE="/etc/systemd/system/kuma-push.service"
 LOG_FILE="/var/log/kuma-push.log"
 ERROR_LOG="/var/log/kuma-push.errors.log"
 DEBUG_LOG="/var/log/kuma-push.debug.log"
+CLEANUP_CONFIG="/usr/local/etc/kuma_cleanup.conf"
 
 # 默认配置
 TASKS=()
 PUSH_STATS=()  # 推送统计
+
+# 日志清理默认配置
+LOG_RETENTION_DAYS=30
+LOG_MAX_SIZE_MB=100
+AUTO_CLEANUP_ENABLED=true
+LAST_CLEANUP_DATE=""
 
 # =========================
 # 初始化
@@ -24,6 +31,7 @@ PUSH_STATS=()  # 推送统计
 
 init_logs() {
     touch "$LOG_FILE" "$ERROR_LOG" "$DEBUG_LOG" 2>/dev/null || true
+    load_cleanup_config
 }
 
 # =========================
@@ -41,6 +49,33 @@ load_config() {
 # 示例：我的服务器|https://uptime.example.com/api/push/abc123|8.8.8.8|icmp|0|60
 EOF
     fi
+}
+
+# 加载日志清理配置
+load_cleanup_config() {
+    if [ -f "$CLEANUP_CONFIG" ]; then
+        source "$CLEANUP_CONFIG"
+    else
+        # 创建默认清理配置
+        cat > "$CLEANUP_CONFIG" << EOF
+# 日志清理配置
+LOG_RETENTION_DAYS=30
+LOG_MAX_SIZE_MB=100
+AUTO_CLEANUP_ENABLED=true
+LAST_CLEANUP_DATE=""
+EOF
+    fi
+}
+
+# 保存清理配置
+save_cleanup_config() {
+    cat > "$CLEANUP_CONFIG" << EOF
+# 日志清理配置
+LOG_RETENTION_DAYS=$LOG_RETENTION_DAYS
+LOG_MAX_SIZE_MB=$LOG_MAX_SIZE_MB
+AUTO_CLEANUP_ENABLED=$AUTO_CLEANUP_ENABLED
+LAST_CLEANUP_DATE="$LAST_CLEANUP_DATE"
+EOF
 }
 
 # 保存配置
@@ -104,6 +139,223 @@ install_dependencies() {
 }
 
 # =========================
+# 日志清理函数
+# =========================
+
+cleanup_logs() {
+    echo "====================================="
+    echo "        日志清理工具"
+    echo "====================================="
+    
+    local before_size=$(du -h "$LOG_FILE" 2>/dev/null | cut -f1)
+    local before_error_size=$(du -h "$ERROR_LOG" 2>/dev/null | cut -f1)
+    local before_debug_size=$(du -h "$DEBUG_LOG" 2>/dev/null | cut -f1)
+    
+    echo "清理前日志大小:"
+    echo "  主日志: $before_size"
+    echo "  错误日志: $before_error_size"
+    echo "  调试日志: $before_debug_size"
+    echo ""
+    
+    local cleaned=0
+    local current_date=$(date +%s)
+    
+    # 按天数清理
+    if [ $LOG_RETENTION_DAYS -gt 0 ]; then
+        local cutoff_date=$(date -d "$LOG_RETENTION_DAYS days ago" +%s 2>/dev/null || date -v-${LOG_RETENTION_DAYS}d +%s 2>/dev/null)
+        if [ -n "$cutoff_date" ]; then
+            echo "清理 ${LOG_RETENTION_DAYS} 天前的日志..."
+            
+            # 备份旧日志（可选）
+            if [ -f "$LOG_FILE" ] && [ -s "$LOG_FILE" ]; then
+                local old_logs=$(grep -l "^\[" "$LOG_FILE" 2>/dev/null | wc -l)
+                # 创建备份（保留最近7天的）
+                local backup_dir="/var/log/kuma-backup"
+                mkdir -p "$backup_dir"
+                tail -n 10000 "$LOG_FILE" > "$backup_dir/kuma-push.log.last"
+                echo "已备份最近10000行日志到 $backup_dir"
+            fi
+            
+            cleaned=1
+        fi
+    fi
+    
+    # 按大小清理
+    if [ $LOG_MAX_SIZE_MB -gt 0 ]; then
+        local max_size_bytes=$((LOG_MAX_SIZE_MB * 1024 * 1024))
+        
+        for log in "$LOG_FILE" "$ERROR_LOG" "$DEBUG_LOG"; do
+            if [ -f "$log" ]; then
+                local current_size=$(stat -c%s "$log" 2>/dev/null || stat -f%z "$log" 2>/dev/null)
+                if [ "$current_size" -gt "$max_size_bytes" ]; then
+                    echo "日志文件 $log 超过 ${LOG_MAX_SIZE_MB}MB，正在压缩..."
+                    # 压缩并轮转
+                    local backup_file="${log}.$(date +%Y%m%d_%H%M%S).gz"
+                    sudo gzip -c "$log" > "$backup_file"
+                    # 保留最近 10000 行
+                    tail -n 10000 "$log" > "${log}.tmp"
+                    sudo mv "${log}.tmp" "$log"
+                    echo "已压缩旧日志到: $backup_file"
+                    cleaned=1
+                fi
+            fi
+        done
+    fi
+    
+    # 清理超过30天的压缩日志
+    find /var/log -name "kuma-*.log.*.gz" -mtime +30 -delete 2>/dev/null
+    find /var/log -name "kuma-backup" -type d -mtime +30 -exec rm -rf {} \; 2>/dev/null
+    
+    local after_size=$(du -h "$LOG_FILE" 2>/dev/null | cut -f1)
+    local after_error_size=$(du -h "$ERROR_LOG" 2>/dev/null | cut -f1)
+    local after_debug_size=$(du -h "$DEBUG_LOG" 2>/dev/null | cut -f1)
+    
+    echo ""
+    echo "清理后日志大小:"
+    echo "  主日志: $after_size"
+    echo "  错误日志: $after_error_size"
+    echo "  调试日志: $after_debug_size"
+    
+    LAST_CLEANUP_DATE=$(date '+%Y-%m-%d %H:%M:%S')
+    save_cleanup_config
+    
+    if [ $cleaned -eq 1 ]; then
+        echo "日志清理完成！"
+    else
+        echo "无需清理，日志文件大小在限制范围内。"
+    fi
+    
+    read -p "按回车键继续..."
+}
+
+configure_cleanup() {
+    load_cleanup_config
+    echo "====================================="
+    echo "      日志清理配置"
+    echo "====================================="
+    echo "[1] 设置日志保留天数 (当前: ${LOG_RETENTION_DAYS}天)"
+    echo "[2] 设置日志最大大小 (当前: ${LOG_MAX_SIZE_MB}MB)"
+    echo "[3] 启用/禁用自动清理 (当前: ${AUTO_CLEANUP_ENABLED})"
+    echo "[4] 立即执行清理"
+    echo "[0] 返回主菜单"
+    echo "====================================="
+    
+    read -p "请选择 [0-4]: " cleanup_choice
+    
+    case $cleanup_choice in
+        1)
+            read -p "请输入日志保留天数 (0=不按时间清理): " days
+            if [[ "$days" =~ ^[0-9]+$ ]]; then
+                LOG_RETENTION_DAYS=$days
+                save_cleanup_config
+                echo "已设置日志保留 ${days} 天"
+            else
+                echo "无效输入！"
+            fi
+            sleep 1
+            configure_cleanup
+            ;;
+        2)
+            read -p "请输入日志最大大小(MB) (0=不按大小限制): " size
+            if [[ "$size" =~ ^[0-9]+$ ]]; then
+                LOG_MAX_SIZE_MB=$size
+                save_cleanup_config
+                echo "已设置日志最大 ${size}MB"
+            else
+                echo "无效输入！"
+            fi
+            sleep 1
+            configure_cleanup
+            ;;
+        3)
+            if [ "$AUTO_CLEANUP_ENABLED" = true ]; then
+                AUTO_CLEANUP_ENABLED=false
+                echo "已禁用自动清理"
+            else
+                AUTO_CLEANUP_ENABLED=true
+                echo "已启用自动清理"
+            fi
+            save_cleanup_config
+            sleep 1
+            configure_cleanup
+            ;;
+        4)
+            cleanup_logs
+            configure_cleanup
+            ;;
+        0)
+            return
+            ;;
+        *)
+            echo "无效选择！"
+            sleep 1
+            configure_cleanup
+            ;;
+    esac
+}
+
+# 自动清理检查（在守护进程中调用）
+auto_cleanup_check() {
+    if [ "$AUTO_CLEANUP_ENABLED" != true ]; then
+        return
+    fi
+    
+    # 检查上次清理时间，如果超过1天则执行清理
+    local last_cleanup_ts=0
+    if [ -n "$LAST_CLEANUP_DATE" ]; then
+        last_cleanup_ts=$(date -d "$LAST_CLEANUP_DATE" +%s 2>/dev/null || echo 0)
+    fi
+    
+    local current_ts=$(date +%s)
+    local days_since_cleanup=$(( (current_ts - last_cleanup_ts) / 86400 ))
+    
+    if [ $days_since_cleanup -ge 1 ]; then
+        echo "[$(date '+%F %T')] 执行自动日志清理..." >> "$LOG_FILE"
+        
+        # 执行清理（不输出到控制台）
+        if [ $LOG_RETENTION_DAYS -gt 0 ]; then
+            # 创建备份目录
+            local backup_dir="/var/log/kuma-backup"
+            mkdir -p "$backup_dir"
+            
+            # 压缩并轮转日志
+            for log in "$LOG_FILE" "$ERROR_LOG" "$DEBUG_LOG"; do
+                if [ -f "$log" ] && [ -s "$log" ]; then
+                    local backup_file="${backup_dir}/$(basename "$log").$(date +%Y%m%d).gz"
+                    sudo gzip -c "$log" > "$backup_file" 2>/dev/null
+                    # 保留最近 5000 行
+                    tail -n 5000 "$log" > "${log}.tmp"
+                    sudo mv "${log}.tmp" "$log"
+                    echo "[$(date '+%F %T')] 已轮转日志: $log -> $backup_file" >> "$LOG_FILE"
+                fi
+            done
+            
+            # 清理超过30天的备份
+            find "$backup_dir" -name "*.gz" -mtime +30 -delete 2>/dev/null
+        fi
+        
+        # 按大小清理
+        if [ $LOG_MAX_SIZE_MB -gt 0 ]; then
+            local max_size_bytes=$((LOG_MAX_SIZE_MB * 1024 * 1024))
+            for log in "$LOG_FILE" "$ERROR_LOG" "$DEBUG_LOG"; do
+                if [ -f "$log" ]; then
+                    local current_size=$(stat -c%s "$log" 2>/dev/null || stat -f%z "$log" 2>/dev/null)
+                    if [ "$current_size" -gt "$max_size_bytes" ]; then
+                        tail -n 5000 "$log" > "${log}.tmp"
+                        sudo mv "${log}.tmp" "$log"
+                        echo "[$(date '+%F %T')] 日志文件超过限制，已截断: $log" >> "$LOG_FILE"
+                    fi
+                fi
+            done
+        fi
+        
+        LAST_CLEANUP_DATE=$(date '+%Y-%m-%d %H:%M:%S')
+        save_cleanup_config
+        echo "[$(date '+%F %T')] 自动日志清理完成" >> "$LOG_FILE"
+    fi
+}
+
+# =========================
 # 函数区
 # =========================
 
@@ -145,10 +397,10 @@ push_to_kuma() {
     local retry_delay=1
     local success=false
     local http_code=""
-    
+
     # 构建完整 URL
     local url="${api}?status=${status}&msg=${msg}&ping=${ping}"
-    
+
     for retry_count in $(seq 1 $max_retries); do
         # 执行 curl 请求，获取 HTTP 状态码
         http_code=$(curl -w "%{http_code}" \
@@ -157,9 +409,9 @@ push_to_kuma() {
             --connect-timeout 5 \
             --max-time 10 \
             "$url" 2>/dev/null)
-        
+
         local curl_exit=$?
-        
+
         # 检查 curl 执行状态和 HTTP 状态码
         if [ $curl_exit -eq 0 ] && [[ "$http_code" =~ ^2[0-9][0-9]$ ]]; then
             success=true
@@ -191,7 +443,7 @@ push_to_kuma() {
             fi
         fi
     done
-    
+
     if $success; then
         return 0
     else
@@ -217,12 +469,14 @@ view_logs() {
         echo "[6] 查看推送重试记录"
         echo "[7] 查看特定任务日志"
         echo "[8] 查看推送统计"
-        echo "[9] 清空日志"
+        echo "[9] 查看日志大小统计"
+        echo "[10] 清空日志"
+        echo "[11] 日志清理工具"
         echo "[0] 返回主菜单"
         echo "====================================="
-        
-        read -p "请选择 [0-9]: " log_choice
-        
+
+        read -p "请选择 [0-11]: " log_choice
+
         case $log_choice in
             1)
                 echo "实时查看主日志 (按 Ctrl+C 返回)..."
@@ -280,6 +534,16 @@ view_logs() {
                 read -p "按回车键继续..."
                 ;;
             9)
+                echo "日志文件大小统计："
+                echo "=============================="
+                ls -lh "$LOG_FILE" "$ERROR_LOG" "$DEBUG_LOG" 2>/dev/null | awk '{print $9 ": " $5}'
+                echo ""
+                echo "备份目录大小："
+                du -sh /var/log/kuma-backup 2>/dev/null || echo "无备份目录"
+                echo "=============================="
+                read -p "按回车键继续..."
+                ;;
+            10)
                 read -p "确认清空所有日志？[y/N] " confirm
                 if [[ "$confirm" =~ ^[Yy]$ ]]; then
                     > "$LOG_FILE"
@@ -288,6 +552,9 @@ view_logs() {
                     echo "日志已清空"
                 fi
                 sleep 1
+                ;;
+            11)
+                configure_cleanup
                 ;;
             0)
                 break
@@ -556,7 +823,7 @@ run_daemon() {
 
     # 检查依赖
     check_dependencies
-    
+
     # 初始化日志
     init_logs
 
@@ -614,10 +881,13 @@ run_daemon() {
 
             # 串行推送：每个任务检测完成后立即推送（带5次重试）
             push_to_kuma "$API" "$STATUS" "$MSG" "$PING" "$NAME"
-            
+
             # 短暂延迟，避免推送过于密集
             sleep 1
         done
+
+        # 执行自动日志清理检查
+        auto_cleanup_check
 
         # 如果没有任务需要执行，短暂休眠
         if [ ${#tasks_to_check[@]} -eq 0 ]; then

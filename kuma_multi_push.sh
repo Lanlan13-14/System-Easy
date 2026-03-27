@@ -2,6 +2,7 @@
 
 # =========================
 # Uptime Kuma 多节点监控推送脚本
+# 优化：立即重试 + 串行推送 + 状态缓存
 # 保存至：/usr/local/bin/kuma-ping
 # 赋权：chmod +x /usr/local/bin/kuma-ping
 # =========================
@@ -113,7 +114,7 @@ get_tcp_ping() {
 }
 
 # =========================
-# 推送函数（带3次重试机制）
+# 推送函数（立即重试机制）
 # =========================
 
 push_to_kuma() {
@@ -122,31 +123,38 @@ push_to_kuma() {
     local msg="$3"
     local ping="$4"
     local name="$5"
-    
-    local max_retries=3
-    local retry_delay=2
+
+    local max_retries=5           # 最多重试5次
+    local retry_delay=1           # 初始重试延迟1秒
     local timeout=10
     local retry_count=0
-    
-    for retry_count in $(seq 1 $max_retries); do
-        # 使用 curl 推送，设置超时时间
+
+    # 构建完整URL
+    local full_url="${api}?status=${status}&msg=${msg}"
+    [ -n "$ping" ] && full_url="${full_url}&ping=${ping}"
+
+    while true; do
+        # 尝试推送
         if curl -s -f -o /dev/null \
             --connect-timeout 5 \
             --max-time $timeout \
-            "${api}?status=${status}&msg=${msg}&ping=${ping}" 2>/dev/null; then
+            "$full_url" 2>/dev/null; then
             
             # 推送成功
-            if [ $retry_count -gt 1 ]; then
-                echo "[$(date '+%F %T')] [$name] 推送成功（第${retry_count}次尝试）"
+            if [ $retry_count -gt 0 ]; then
+                echo "[$(date '+%F %T')] [$name] 推送成功（第$((retry_count+1))次尝试）" >> /var/log/kuma-push.log
             fi
             return 0
         else
             # 推送失败
+            retry_count=$((retry_count + 1))
+            
             if [ $retry_count -lt $max_retries ]; then
-                echo "[$(date '+%F %T')] [$name] 推送失败，${retry_delay}秒后重试（${retry_count}/${max_retries}）" >&2
+                echo "[$(date '+%F %T')] [$name] 推送失败，${retry_delay}秒后立即重试（${retry_count}/${max_retries}）" >> /var/log/kuma-push.log
                 sleep $retry_delay
-                # 指数退避，逐渐增加延迟
+                # 指数退避，但保持较短延迟以快速恢复
                 retry_delay=$((retry_delay * 2))
+                [ $retry_delay -gt 10 ] && retry_delay=10
             else
                 echo "[$(date '+%F %T')] [$name] 推送失败，已重试${max_retries}次" >&2
                 # 记录到失败日志文件
@@ -401,27 +409,38 @@ delete_task() {
 }
 
 # =========================
-# 主逻辑（多任务调度）
+# 主逻辑（串行推送 + 状态缓存）
 # =========================
 
 run_daemon() {
     echo "启动 Kuma 推送守护进程..."
     echo "日志文件: /var/log/kuma-push.log"
     echo "错误日志: /var/log/kuma-push.errors.log"
-    
+
     # 检查依赖
     check_dependencies
-    
+
+    # 状态缓存
     declare -A LAST_RUN
+    declare -A LAST_STATUS
+    declare -A FAIL_COUNT
+    
     local log_file="/var/log/kuma-push.log"
     local error_log="/var/log/kuma-push.errors.log"
     
+    # 推送队列和锁文件
+    local push_queue=()
+    local push_lock="/tmp/kuma-push.lock"
+
     # 创建日志文件（如果不存在）
     touch "$log_file" "$error_log" 2>/dev/null || true
-    
+
     while true; do
         NOW=$(date +%s)
         load_config
+        
+        # 清空推送队列
+        push_queue=()
 
         for TASK in "${TASKS[@]}"; do
             # 跳过注释和空行
@@ -443,31 +462,120 @@ run_daemon() {
 
             LAST_RUN["$NAME"]=$NOW
 
-            # 执行检测
-            if [ "$MODE" = "icmp" ]; then
-                PING=$(get_icmp_ping "$TARGET")
-            else
-                PING=$(get_tcp_ping "$TARGET" "$PORT")
-            fi
+            # 执行检测（带重试）
+            local check_success=false
+            local ping_result=""
+            local max_check_retry=3
+            local check_retry=0
+            
+            while [ $check_retry -lt $max_check_retry ]; do
+                if [ "$MODE" = "icmp" ]; then
+                    ping_result=$(get_icmp_ping "$TARGET")
+                else
+                    ping_result=$(get_tcp_ping "$TARGET" "$PORT")
+                fi
+                
+                if [ -n "$ping_result" ]; then
+                    check_success=true
+                    break
+                fi
+                
+                check_retry=$((check_retry + 1))
+                if [ $check_retry -lt $max_check_retry ]; then
+                    echo "[$(date '+%F %T')] [$NAME] 检测失败，2秒后重试（${check_retry}/${max_check_retry}）" >> "$log_file"
+                    sleep 2
+                fi
+            done
 
-            # 状态判断
-            if [ -n "$PING" ]; then
-                STATUS="up"
-                MSG="OK"
+            # 确定状态
+            local current_status=""
+            local msg=""
+            local final_ping=""
+            
+            if $check_success; then
+                current_status="up"
+                msg="OK"
+                final_ping="$ping_result"
             else
-                STATUS="down"
-                MSG="timeout"
-                PING=""
+                current_status="down"
+                msg="timeout"
+                final_ping=""
             fi
 
             # 输出检测结果到日志
-            echo "[$(date '+%F %T')] [$NAME] 检测结果: $TARGET $STATUS ${PING}ms" >> "$log_file"
+            echo "[$(date '+%F %T')] [$NAME] 检测结果: $TARGET $current_status ${final_ping}ms" >> "$log_file"
 
-            # 调用带重试的推送函数（3次重试）
-            push_to_kuma "$API" "$STATUS" "$MSG" "$PING" "$NAME"
+            # 状态缓存逻辑
+            local last_status="${LAST_STATUS[$NAME]}"
+            local fail_count="${FAIL_COUNT[$NAME]:-0}"
+            local should_push=false
+            
+            if [ "$current_status" = "down" ]; then
+                # 连续失败计数
+                fail_count=$((fail_count + 1))
+                FAIL_COUNT[$NAME]=$fail_count
+                
+                # 只有连续失败3次才推送down状态，减少误报
+                if [ $fail_count -ge 3 ]; then
+                    should_push=true
+                    # 重置计数，避免重复推送
+                    if [ "$last_status" != "down" ]; then
+                        FAIL_COUNT[$NAME]=0
+                    fi
+                else
+                    echo "[$(date '+%F %T')] [$NAME] 检测到down，连续失败${fail_count}/3次，暂不推送" >> "$log_file"
+                    continue
+                fi
+            else
+                # up状态，重置失败计数
+                if [ "$last_status" = "down" ]; then
+                    echo "[$(date '+%F %T')] [$NAME] 服务已恢复" >> "$log_file"
+                    should_push=true
+                elif [ -z "$last_status" ] || [ "$last_status" != "$current_status" ]; then
+                    # 首次检测或状态变化
+                    should_push=true
+                fi
+                fail_count=0
+                FAIL_COUNT[$NAME]=0
+            fi
+            
+            # 状态变化时推送
+            if [ "$current_status" != "$last_status" ]; then
+                should_push=true
+            fi
+            
+            # 更新最后状态
+            LAST_STATUS[$NAME]="$current_status"
+            
+            # 加入推送队列
+            if $should_push; then
+                push_queue+=("$NAME|$API|$current_status|$msg|$final_ping")
+            fi
         done
 
-        sleep 5
+        # 串行处理推送队列（关键：避免并发推送）
+        if [ ${#push_queue[@]} -gt 0 ]; then
+            echo "[$(date '+%F %T')] 开始串行推送 ${#push_queue[@]} 个任务..." >> "$log_file"
+            
+            # 使用文件锁确保串行执行
+            (
+                flock -x 200
+                for push_item in "${push_queue[@]}"; do
+                    IFS='|' read -r Q_NAME Q_API Q_STATUS Q_MSG Q_PING <<< "$push_item"
+                    
+                    # 调用推送函数（内部有立即重试机制）
+                    push_to_kuma "$Q_API" "$Q_STATUS" "$Q_MSG" "$Q_PING" "$Q_NAME"
+                    
+                    # 推送间隔，避免瞬间大量请求
+                    sleep 1
+                done
+            ) 200>"$push_lock"
+            
+            echo "[$(date '+%F %T')] 推送队列处理完成" >> "$log_file"
+        fi
+
+        # 短暂休眠，避免CPU占用过高
+        sleep 2
     done
 }
 

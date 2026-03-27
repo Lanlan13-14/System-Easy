@@ -43,7 +43,7 @@ sudo wget -O /usr/local/bin/kuma_multi_push.sh https://raw.githubusercontent.com
 ```
 #### 卸载Kuma-ping
 ```
-sudo rm -f /usr/local/bin/kuma_multi_push.sh /usr/local/bin/kuma-ping
+sudo systemctl stop kuma-push.service 2>/dev/null; sudo systemctl disable kuma-push.service 2>/dev/null; sudo rm -f /etc/systemd/system/kuma-push.service; sudo rm -f /usr/local/bin/kuma-ping /usr/local/bin/kuma_multi_push.sh; sudo rm -rf /usr/local/etc/kuma_tasks.conf /var/lib/kuma-push /var/log/kuma-push.log /var/log/kuma-push.errors.log /var/log/kuma-push.debug.log; sudo systemctl daemon-reload; echo "卸载完成！"
 ```
 ### 特别感谢
 [byJoey](https://github.com/byJoey/Actions-bbr-v3)

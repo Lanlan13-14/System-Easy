@@ -2,7 +2,7 @@
 
 # =========================
 # Uptime Kuma 多节点监控推送脚本
-# 优化版：串行推送 + HTTP状态码检测 + 日志查看 + 日志清理
+# 优化版：串行推送 + HTTP状态码检测 + 日志查看 + 日志清理（单备份）
 # 保存至：/usr/local/bin/kuma-ping
 # 赋权：chmod +x /usr/local/bin/kuma-ping
 # =========================
@@ -84,6 +84,47 @@ save_config() {
 }
 
 # =========================
+# 统一的日志备份函数（只保留一个最新备份）
+# =========================
+
+# 创建日志备份（会覆盖旧备份）
+create_single_backup() {
+    local log_file="$1"
+    local backup_dir="/var/log/kuma-backup"
+    local backup_name="$(basename "$log_file").backup.gz"
+    local backup_path="$backup_dir/$backup_name"
+    
+    mkdir -p "$backup_dir"
+    
+    if [ -f "$log_file" ] && [ -s "$log_file" ]; then
+        # 压缩备份（会覆盖旧的备份文件）
+        if gzip -c "$log_file" > "$backup_path" 2>/dev/null; then
+            echo "[$(date '+%F %T')] 已更新备份: $backup_path" >> "$DEBUG_LOG"
+            return 0
+        fi
+    fi
+    return 1
+}
+
+# 轮转日志（保留指定行数，并创建备份）
+rotate_log_with_backup() {
+    local log_file="$1"
+    local keep_lines=${2:-10000}
+    
+    if [ -f "$log_file" ] && [ -s "$log_file" ]; then
+        # 创建备份（会覆盖旧备份）
+        create_single_backup "$log_file"
+        
+        # 保留最近的行数
+        tail -n $keep_lines "$log_file" > "${log_file}.tmp"
+        mv "${log_file}.tmp" "$log_file"
+        
+        return 0
+    fi
+    return 1
+}
+
+# =========================
 # 依赖检查与安装
 # =========================
 
@@ -139,7 +180,7 @@ install_dependencies() {
 }
 
 # =========================
-# 日志清理函数
+# 日志清理函数（统一单备份策略）
 # =========================
 
 cleanup_logs() {
@@ -158,29 +199,8 @@ cleanup_logs() {
     echo ""
     
     local cleaned=0
-    local current_date=$(date +%s)
     
-    # 按天数清理
-    if [ $LOG_RETENTION_DAYS -gt 0 ]; then
-        local cutoff_date=$(date -d "$LOG_RETENTION_DAYS days ago" +%s 2>/dev/null || date -v-${LOG_RETENTION_DAYS}d +%s 2>/dev/null)
-        if [ -n "$cutoff_date" ]; then
-            echo "清理 ${LOG_RETENTION_DAYS} 天前的日志..."
-            
-            # 备份旧日志（可选）
-            if [ -f "$LOG_FILE" ] && [ -s "$LOG_FILE" ]; then
-                local old_logs=$(grep -l "^\[" "$LOG_FILE" 2>/dev/null | wc -l)
-                # 创建备份（保留最近7天的）
-                local backup_dir="/var/log/kuma-backup"
-                mkdir -p "$backup_dir"
-                tail -n 10000 "$LOG_FILE" > "$backup_dir/kuma-push.log.last"
-                echo "已备份最近10000行日志到 $backup_dir"
-            fi
-            
-            cleaned=1
-        fi
-    fi
-    
-    # 按大小清理
+    # 按大小清理（超过限制时轮转）
     if [ $LOG_MAX_SIZE_MB -gt 0 ]; then
         local max_size_bytes=$((LOG_MAX_SIZE_MB * 1024 * 1024))
         
@@ -188,23 +208,28 @@ cleanup_logs() {
             if [ -f "$log" ]; then
                 local current_size=$(stat -c%s "$log" 2>/dev/null || stat -f%z "$log" 2>/dev/null)
                 if [ "$current_size" -gt "$max_size_bytes" ]; then
-                    echo "日志文件 $log 超过 ${LOG_MAX_SIZE_MB}MB，正在压缩..."
-                    # 压缩并轮转
-                    local backup_file="${log}.$(date +%Y%m%d_%H%M%S).gz"
-                    sudo gzip -c "$log" > "$backup_file"
-                    # 保留最近 10000 行
-                    tail -n 10000 "$log" > "${log}.tmp"
-                    sudo mv "${log}.tmp" "$log"
-                    echo "已压缩旧日志到: $backup_file"
+                    echo "日志文件 $(basename "$log") 超过 ${LOG_MAX_SIZE_MB}MB，正在轮转..."
+                    
+                    # 轮转日志（自动创建备份并保留最近10000行）
+                    rotate_log_with_backup "$log" 10000
+                    
+                    echo "  ✓ 已备份并截断日志"
                     cleaned=1
                 fi
             fi
         done
     fi
     
-    # 清理超过30天的压缩日志
-    find /var/log -name "kuma-*.log.*.gz" -mtime +30 -delete 2>/dev/null
-    find /var/log -name "kuma-backup" -type d -mtime +30 -exec rm -rf {} \; 2>/dev/null
+    # 显示备份信息
+    local backup_dir="/var/log/kuma-backup"
+    if [ -d "$backup_dir" ]; then
+        echo ""
+        echo "当前备份文件:"
+        ls -lh "$backup_dir"/*.backup.gz 2>/dev/null | awk '{print "  " $9 ": " $5}' || echo "  无备份文件"
+        
+        local backup_size=$(du -sh "$backup_dir" 2>/dev/null | cut -f1)
+        echo "备份总大小: $backup_size"
+    fi
     
     local after_size=$(du -h "$LOG_FILE" 2>/dev/null | cut -f1)
     local after_error_size=$(du -h "$ERROR_LOG" 2>/dev/null | cut -f1)
@@ -220,9 +245,9 @@ cleanup_logs() {
     save_cleanup_config
     
     if [ $cleaned -eq 1 ]; then
-        echo "日志清理完成！"
+        echo "✓ 日志清理完成"
     else
-        echo "无需清理，日志文件大小在限制范围内。"
+        echo "✓ 无需清理，日志文件大小在限制范围内"
     fi
     
     read -p "按回车键继续..."
@@ -233,30 +258,21 @@ configure_cleanup() {
     echo "====================================="
     echo "      日志清理配置"
     echo "====================================="
-    echo "[1] 设置日志保留天数 (当前: ${LOG_RETENTION_DAYS}天)"
-    echo "[2] 设置日志最大大小 (当前: ${LOG_MAX_SIZE_MB}MB)"
-    echo "[3] 启用/禁用自动清理 (当前: ${AUTO_CLEANUP_ENABLED})"
-    echo "[4] 立即执行清理"
+    echo "[1] 设置日志最大大小 (当前: ${LOG_MAX_SIZE_MB}MB)"
+    echo "[2] 启用/禁用自动清理 (当前: ${AUTO_CLEANUP_ENABLED})"
+    echo "[3] 立即执行清理"
+    echo "[4] 查看备份文件"
+    echo "[5] 恢复备份"
     echo "[0] 返回主菜单"
     echo "====================================="
+    echo "注：备份策略为只保留一个最新备份文件"
+    echo "====================================="
     
-    read -p "请选择 [0-4]: " cleanup_choice
+    read -p "请选择 [0-5]: " cleanup_choice
     
     case $cleanup_choice in
         1)
-            read -p "请输入日志保留天数 (0=不按时间清理): " days
-            if [[ "$days" =~ ^[0-9]+$ ]]; then
-                LOG_RETENTION_DAYS=$days
-                save_cleanup_config
-                echo "已设置日志保留 ${days} 天"
-            else
-                echo "无效输入！"
-            fi
-            sleep 1
-            configure_cleanup
-            ;;
-        2)
-            read -p "请输入日志最大大小(MB) (0=不按大小限制): " size
+            read -p "请输入日志最大大小(MB) (0=不限制): " size
             if [[ "$size" =~ ^[0-9]+$ ]]; then
                 LOG_MAX_SIZE_MB=$size
                 save_cleanup_config
@@ -267,7 +283,7 @@ configure_cleanup() {
             sleep 1
             configure_cleanup
             ;;
-        3)
+        2)
             if [ "$AUTO_CLEANUP_ENABLED" = true ]; then
                 AUTO_CLEANUP_ENABLED=false
                 echo "已禁用自动清理"
@@ -279,8 +295,59 @@ configure_cleanup() {
             sleep 1
             configure_cleanup
             ;;
-        4)
+        3)
             cleanup_logs
+            configure_cleanup
+            ;;
+        4)
+            echo "====================================="
+            echo "备份文件列表:"
+            ls -lh /var/log/kuma-backup/*.backup.gz 2>/dev/null || echo "无备份文件"
+            echo "====================================="
+            read -p "按回车键继续..."
+            configure_cleanup
+            ;;
+        5)
+            echo "====================================="
+            echo "恢复备份（会覆盖当前日志）"
+            echo "====================================="
+            local backup_files=(/var/log/kuma-backup/*.backup.gz)
+            if [ ${#backup_files[@]} -eq 0 ] || [ ! -f "${backup_files[0]}" ]; then
+                echo "没有找到备份文件！"
+            else
+                echo "可恢复的备份文件:"
+                local i=1
+                for backup in "${backup_files[@]}"; do
+                    if [ -f "$backup" ]; then
+                        local backup_name=$(basename "$backup")
+                        local backup_size=$(du -h "$backup" | cut -f1)
+                        echo "[$i] $backup_name ($backup_size)"
+                        ((i++))
+                    fi
+                done
+                
+                read -p "请选择要恢复的备份 [1-${#backup_files[@]}]: " choice
+                if [[ "$choice" =~ ^[0-9]+$ ]] && [ $choice -le ${#backup_files[@]} ]; then
+                    local selected_backup="${backup_files[$((choice-1))]}"
+                    local log_name=$(basename "$selected_backup" .backup.gz)
+                    
+                    echo "选择恢复: $log_name"
+                    read -p "确认恢复？这将覆盖当前日志 [y/N]: " confirm
+                    if [[ "$confirm" =~ ^[Yy]$ ]]; then
+                        # 先备份当前日志
+                        local current_backup="/var/log/kuma-backup/${log_name}.before_restore.gz"
+                        if [ -f "/var/log/$log_name" ]; then
+                            gzip -c "/var/log/$log_name" > "$current_backup"
+                            echo "已备份当前日志到: $current_backup"
+                        fi
+                        
+                        # 恢复备份
+                        gunzip -c "$selected_backup" > "/var/log/$log_name"
+                        echo "✓ 日志已恢复"
+                    fi
+                fi
+            fi
+            read -p "按回车键继续..."
             configure_cleanup
             ;;
         0)
@@ -312,38 +379,17 @@ auto_cleanup_check() {
     if [ $days_since_cleanup -ge 1 ]; then
         echo "[$(date '+%F %T')] 执行自动日志清理..." >> "$LOG_FILE"
         
-        # 执行清理（不输出到控制台）
-        if [ $LOG_RETENTION_DAYS -gt 0 ]; then
-            # 创建备份目录
-            local backup_dir="/var/log/kuma-backup"
-            mkdir -p "$backup_dir"
-            
-            # 压缩并轮转日志
-            for log in "$LOG_FILE" "$ERROR_LOG" "$DEBUG_LOG"; do
-                if [ -f "$log" ] && [ -s "$log" ]; then
-                    local backup_file="${backup_dir}/$(basename "$log").$(date +%Y%m%d).gz"
-                    sudo gzip -c "$log" > "$backup_file" 2>/dev/null
-                    # 保留最近 5000 行
-                    tail -n 5000 "$log" > "${log}.tmp"
-                    sudo mv "${log}.tmp" "$log"
-                    echo "[$(date '+%F %T')] 已轮转日志: $log -> $backup_file" >> "$LOG_FILE"
-                fi
-            done
-            
-            # 清理超过30天的备份
-            find "$backup_dir" -name "*.gz" -mtime +30 -delete 2>/dev/null
-        fi
-        
         # 按大小清理
         if [ $LOG_MAX_SIZE_MB -gt 0 ]; then
             local max_size_bytes=$((LOG_MAX_SIZE_MB * 1024 * 1024))
+            
             for log in "$LOG_FILE" "$ERROR_LOG" "$DEBUG_LOG"; do
                 if [ -f "$log" ]; then
                     local current_size=$(stat -c%s "$log" 2>/dev/null || stat -f%z "$log" 2>/dev/null)
                     if [ "$current_size" -gt "$max_size_bytes" ]; then
-                        tail -n 5000 "$log" > "${log}.tmp"
-                        sudo mv "${log}.tmp" "$log"
-                        echo "[$(date '+%F %T')] 日志文件超过限制，已截断: $log" >> "$LOG_FILE"
+                        # 轮转日志（只保留一个最新备份）
+                        rotate_log_with_backup "$log" 5000
+                        echo "[$(date '+%F %T')] 已轮转日志: $log" >> "$LOG_FILE"
                     fi
                 fi
             done
@@ -538,18 +584,23 @@ view_logs() {
                 echo "=============================="
                 ls -lh "$LOG_FILE" "$ERROR_LOG" "$DEBUG_LOG" 2>/dev/null | awk '{print $9 ": " $5}'
                 echo ""
-                echo "备份目录大小："
-                du -sh /var/log/kuma-backup 2>/dev/null || echo "无备份目录"
+                echo "备份文件："
+                ls -lh /var/log/kuma-backup/*.backup.gz 2>/dev/null | awk '{print "  " $9 ": " $5}' || echo "  无备份文件"
                 echo "=============================="
                 read -p "按回车键继续..."
                 ;;
             10)
                 read -p "确认清空所有日志？[y/N] " confirm
                 if [[ "$confirm" =~ ^[Yy]$ ]]; then
+                    # 清空前先备份
+                    create_single_backup "$LOG_FILE"
+                    create_single_backup "$ERROR_LOG"
+                    create_single_backup "$DEBUG_LOG"
+                    
                     > "$LOG_FILE"
                     > "$ERROR_LOG"
                     > "$DEBUG_LOG"
-                    echo "日志已清空"
+                    echo "日志已清空，已创建备份"
                 fi
                 sleep 1
                 ;;

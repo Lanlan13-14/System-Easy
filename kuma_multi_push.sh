@@ -2,6 +2,7 @@
 
 # =========================
 # Uptime Kuma 多节点监控推送脚本
+# 优化版：串行推送 + HTTP状态码检测 + 日志查看
 # 保存至：/usr/local/bin/kuma-ping
 # 赋权：chmod +x /usr/local/bin/kuma-ping
 # =========================
@@ -9,17 +10,33 @@
 # 配置文件路径
 CONFIG_FILE="/usr/local/etc/kuma_tasks.conf"
 SERVICE_FILE="/etc/systemd/system/kuma-push.service"
+LOG_FILE="/var/log/kuma-push.log"
+ERROR_LOG="/var/log/kuma-push.errors.log"
+DEBUG_LOG="/var/log/kuma-push.debug.log"
 
 # 默认配置
 TASKS=()
+PUSH_STATS=()  # 推送统计
 
+# =========================
+# 初始化
+# =========================
+
+init_logs() {
+    touch "$LOG_FILE" "$ERROR_LOG" "$DEBUG_LOG" 2>/dev/null || true
+}
+
+# =========================
 # 加载配置
+# =========================
+
 load_config() {
     if [ -f "$CONFIG_FILE" ]; then
         mapfile -t TASKS < "$CONFIG_FILE"
     else
         # 创建默认配置
-        cat > "$CONFIG_FILE" << EOF
+        cat > "$CONFIG_FILE" << 'EOF'
+# Uptime Kuma Push 监控配置
 # 格式：名称|API_URL|目标|模式|端口|间隔(秒)
 # 示例：我的服务器|https://uptime.example.com/api/push/abc123|8.8.8.8|icmp|0|60
 EOF
@@ -113,7 +130,7 @@ get_tcp_ping() {
 }
 
 # =========================
-# 推送函数（串行推送，失败立即重试最多5次）
+# 推送函数（优化版：HTTP状态码检测 + 指数退避）
 # =========================
 
 push_to_kuma() {
@@ -124,40 +141,163 @@ push_to_kuma() {
     local name="$5"
 
     local max_retries=5
-    local timeout=10
     local retry_count=0
+    local retry_delay=1
     local success=false
-
+    local http_code=""
+    
+    # 构建完整 URL
+    local url="${api}?status=${status}&msg=${msg}&ping=${ping}"
+    
     for retry_count in $(seq 1 $max_retries); do
-        # 使用 curl 推送，设置超时时间
-        if curl -s -f -o /dev/null \
+        # 执行 curl 请求，获取 HTTP 状态码
+        http_code=$(curl -w "%{http_code}" \
+            -o /dev/null \
+            -s \
             --connect-timeout 5 \
-            --max-time $timeout \
-            "${api}?status=${status}&msg=${msg}&ping=${ping}" 2>/dev/null; then
-            
+            --max-time 10 \
+            "$url" 2>/dev/null)
+        
+        local curl_exit=$?
+        
+        # 检查 curl 执行状态和 HTTP 状态码
+        if [ $curl_exit -eq 0 ] && [[ "$http_code" =~ ^2[0-9][0-9]$ ]]; then
             success=true
             if [ $retry_count -gt 1 ]; then
-                echo "[$(date '+%F %T')] [$name] 推送成功（第${retry_count}次尝试）"
+                echo "[$(date '+%F %T')] [$name] ✓ 推送成功（第${retry_count}次尝试，HTTP:$http_code）" >> "$LOG_FILE"
             fi
             break
         else
-            # 推送失败，立即重试（不等待）
+            # 推送失败
             if [ $retry_count -lt $max_retries ]; then
-                echo "[$(date '+%F %T')] [$name] 推送失败，立即重试（${retry_count}/${max_retries}）" >&2
-                # 不等待，立即继续下一次重试
+                local error_msg=""
+                if [ $curl_exit -ne 0 ]; then
+                    error_msg="curl错误码:$curl_exit"
+                else
+                    error_msg="HTTP:$http_code"
+                fi
+                echo "[$(date '+%F %T')] [$name] ✗ 推送失败 ($error_msg)，${retry_delay}秒后重试（${retry_count}/${max_retries}）" >> "$ERROR_LOG"
+                sleep $retry_delay
+                # 指数退避：1, 2, 4, 8 秒
+                retry_delay=$((retry_delay * 2))
             else
-                echo "[$(date '+%F %T')] [$name] 推送失败，已重试${max_retries}次" >&2
-                # 记录到失败日志文件
-                echo "[$(date '+%F %T')] [$name] 推送失败 API:${api} STATUS:${status} MSG:${msg} PING:${ping}" >> /var/log/kuma-push.errors.log 2>/dev/null
+                echo "[$(date '+%F %T')] [$name] ✗ 推送最终失败，已重试${max_retries}次" >> "$ERROR_LOG"
+                if [ $curl_exit -ne 0 ]; then
+                    echo "[$(date '+%F %T')] [$name] 详情: curl错误码=$curl_exit, URL=$url" >> "$ERROR_LOG"
+                else
+                    echo "[$(date '+%F %T')] [$name] 详情: HTTP=$http_code, URL=$url" >> "$ERROR_LOG"
+                fi
+                return 1
             fi
         fi
     done
-
+    
     if $success; then
         return 0
     else
         return 1
     fi
+}
+
+# =========================
+# 日志查看函数
+# =========================
+
+view_logs() {
+    while true; do
+        clear
+        echo "====================================="
+        echo "        日志查看工具"
+        echo "====================================="
+        echo "[1] 实时查看主日志 (tail -f)"
+        echo "[2] 实时查看错误日志 (tail -f)"
+        echo "[3] 查看最近50行主日志"
+        echo "[4] 查看最近50行错误日志"
+        echo "[5] 查看推送失败记录"
+        echo "[6] 查看推送重试记录"
+        echo "[7] 查看特定任务日志"
+        echo "[8] 查看推送统计"
+        echo "[9] 清空日志"
+        echo "[0] 返回主菜单"
+        echo "====================================="
+        
+        read -p "请选择 [0-9]: " log_choice
+        
+        case $log_choice in
+            1)
+                echo "实时查看主日志 (按 Ctrl+C 返回)..."
+                tail -f "$LOG_FILE"
+                ;;
+            2)
+                echo "实时查看错误日志 (按 Ctrl+C 返回)..."
+                tail -f "$ERROR_LOG"
+                ;;
+            3)
+                echo "最近50行主日志："
+                tail -50 "$LOG_FILE"
+                read -p "按回车键继续..."
+                ;;
+            4)
+                echo "最近50行错误日志："
+                tail -50 "$ERROR_LOG"
+                read -p "按回车键继续..."
+                ;;
+            5)
+                echo "推送失败记录："
+                grep "✗ 推送" "$ERROR_LOG" | tail -20
+                read -p "按回车键继续..."
+                ;;
+            6)
+                echo "推送重试记录："
+                grep "重试" "$ERROR_LOG" | tail -20
+                read -p "按回车键继续..."
+                ;;
+            7)
+                read -p "请输入任务名称: " task_name
+                if [ -n "$task_name" ]; then
+                    echo "任务 [$task_name] 的日志："
+                    grep "\[$task_name\]" "$LOG_FILE" | tail -30
+                    echo ""
+                    echo "错误日志："
+                    grep "\[$task_name\]" "$ERROR_LOG" | tail -10
+                fi
+                read -p "按回车键继续..."
+                ;;
+            8)
+                echo "推送统计："
+                echo "=============================="
+                local total_push=$(grep "✓ 推送成功" "$LOG_FILE" | wc -l)
+                local failed_push=$(grep "✗ 推送最终失败" "$ERROR_LOG" | wc -l)
+                local retry_push=$(grep "重试" "$ERROR_LOG" | wc -l)
+                echo "总推送次数: $total_push"
+                echo "推送失败次数: $failed_push"
+                echo "重试次数: $retry_push"
+                if [ $total_push -gt 0 ]; then
+                    local success_rate=$(( (total_push - failed_push) * 100 / total_push ))
+                    echo "成功率: ${success_rate}%"
+                fi
+                echo "=============================="
+                read -p "按回车键继续..."
+                ;;
+            9)
+                read -p "确认清空所有日志？[y/N] " confirm
+                if [[ "$confirm" =~ ^[Yy]$ ]]; then
+                    > "$LOG_FILE"
+                    > "$ERROR_LOG"
+                    > "$DEBUG_LOG"
+                    echo "日志已清空"
+                fi
+                sleep 1
+                ;;
+            0)
+                break
+                ;;
+            *)
+                echo "无效选择！"
+                sleep 1
+                ;;
+        esac
+    done
 }
 
 # =========================
@@ -180,6 +320,8 @@ User=root
 ExecStart=$script_path --daemon
 Restart=always
 RestartSec=10
+StandardOutput=append:$LOG_FILE
+StandardError=append:$ERROR_LOG
 
 [Install]
 WantedBy=multi-user.target
@@ -409,19 +551,16 @@ delete_task() {
 
 run_daemon() {
     echo "启动 Kuma 推送守护进程..."
-    echo "日志文件: /var/log/kuma-push.log"
-    echo "错误日志: /var/log/kuma-push.errors.log"
+    echo "日志文件: $LOG_FILE"
+    echo "错误日志: $ERROR_LOG"
 
     # 检查依赖
     check_dependencies
+    
+    # 初始化日志
+    init_logs
 
     declare -A LAST_RUN
-    local log_file="/var/log/kuma-push.log"
-    local error_log="/var/log/kuma-push.errors.log"
-    local push_queue=()  # 推送队列
-
-    # 创建日志文件（如果不存在）
-    touch "$log_file" "$error_log" 2>/dev/null || true
 
     while true; do
         NOW=$(date +%s)
@@ -471,7 +610,7 @@ run_daemon() {
             fi
 
             # 输出检测结果到日志
-            echo "[$(date '+%F %T')] [$NAME] 检测结果: $TARGET $STATUS ${PING}ms" >> "$log_file"
+            echo "[$(date '+%F %T')] [$NAME] 检测: $TARGET -> $STATUS (${PING:-timeout}ms)" >> "$LOG_FILE"
 
             # 串行推送：每个任务检测完成后立即推送（带5次重试）
             push_to_kuma "$API" "$STATUS" "$MSG" "$PING" "$NAME"
@@ -507,6 +646,7 @@ show_menu() {
     echo "[9] 停止服务"
     echo "[10] 重启服务"
     echo "[11] 查看服务状态"
+    echo "[12] 查看日志"
     echo "[0] 退出"
     echo "====================================="
 }
@@ -523,7 +663,7 @@ case "$1" in
         # 交互式菜单
         while true; do
             show_menu
-            read -p "请选择操作 [0-11]: " choice
+            read -p "请选择操作 [0-12]: " choice
 
             case $choice in
                 1) list_tasks && read -p "按回车键继续..." ;;
@@ -537,6 +677,7 @@ case "$1" in
                 9) stop_service && read -p "按回车键继续..." ;;
                 10) restart_service && read -p "按回车键继续..." ;;
                 11) service_status && read -p "按回车键继续..." ;;
+                12) view_logs ;;
                 0) echo "再见！下次使用请输入kuma-ping"; exit 0 ;;
                 *) echo "无效选择！" && sleep 2 ;;
             esac

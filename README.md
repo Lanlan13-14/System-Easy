@@ -37,7 +37,7 @@ sudo apt update && sudo apt install -y bc tcptraceroute && sudo wget -O /usr/bin
 ```
 sudo rm -f /usr/bin/tcping /usr/bin/tcping.sh && sudo apt remove -y bc tcptraceroute
 ```
-#### 安装 TCPING（Red Hat 系）
+#### 仅TCPING（Red Hat 系）
 
 ```bash
 # RHEL/CentOS 7/8/9 及衍生版本
@@ -51,7 +51,7 @@ sudo yum install -y epel-release && sudo yum install -y bc tcptraceroute && sudo
 sudo dnf install -y epel-release && sudo dnf install -y bc tcptraceroute && sudo curl -o /usr/bin/tcping https://raw.githubusercontent.com/Lanlan13-14/System-Easy/refs/heads/main/tcping.sh && sudo chmod +x /usr/bin/tcping
 ```
 
-#### 卸载 TCPING（Red Hat 系）
+#### 卸载TCPING（Red Hat 系）
 
 ```bash
 # RHEL/CentOS 7/8/9 及衍生版本

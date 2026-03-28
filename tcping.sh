@@ -6,6 +6,7 @@ interval=1
 timeout=3
 quiet=0
 rtts=()
+ipver=""
 
 usage() {
 cat <<EOF
@@ -18,13 +19,15 @@ Options:
   -p port     port number (default 80)
   -q quiet    (only statistics)
   -t timeout  seconds per probe (default 3)
+  -4          force IPv4
+  -6          force IPv6
   -h          print help and exit
 EOF
 exit 0
 }
 
 # getopt 解析参数
-ARGS=$(getopt -o c:i:p:t:qh --long help -n "tcping" -- "$@")
+ARGS=$(getopt -o c:i:p:t:q46h --long help -n "tcping" -- "$@")
 [ $? -ne 0 ] && exit 1
 eval set -- "$ARGS"
 
@@ -35,6 +38,8 @@ while true; do
         -p) port="$2"; shift 2 ;;
         -t) timeout="$2"; shift 2 ;;
         -q) quiet=1; shift ;;
+        -4) ipver="-4"; shift ;;
+        -6) ipver="-6"; shift ;;
         -h|--help) usage ;;
         --) shift; break ;;
         *) echo "Internal error!"; exit 1 ;;
@@ -54,9 +59,7 @@ command -v bc >/dev/null 2>&1 || {
     exit 1
 }
 
-fmt2() {
-    printf "%.2f" "$1"
-}
+fmt2() { printf "%.2f" "$1"; }
 
 update_stats() {
     rtt="$1"
@@ -82,11 +85,7 @@ print_stats() {
     fi
 
     fail=$((sent-ok))
-    if [ "$sent" -gt 0 ]; then
-        loss=$(echo "scale=2; $fail*100/$sent" | bc)
-    else
-        loss=0
-    fi
+    loss=$(echo "scale=2; if ($sent>0) $fail*100/$sent else 0" | bc)
 
     mdev=0
     if [ "$ok" -gt 0 ]; then
@@ -117,7 +116,8 @@ sum=0
 seq=0
 
 while :; do
-    out=$(tcptraceroute -n -f 255 -m 255 -q 1 -w "$timeout" "$dest" "$port" 2>/dev/null)
+    # ✅ 传入 -4 或 -6
+    out=$(tcptraceroute $ipver -n -f 255 -m 255 -q 1 -w "$timeout" "$dest" "$port" 2>/dev/null)
 
     rtt=$(grep -Eo '[0-9]+\.[0-9]+ ms' <<< "$out" | head -n1 | awk '{print $1}')
 

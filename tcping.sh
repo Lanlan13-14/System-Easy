@@ -23,11 +23,9 @@ EOF
 exit 0
 }
 
-# 使用 getopt 重新解析参数，支持选项和参数任意顺序
+# getopt 解析参数
 ARGS=$(getopt -o c:i:p:t:qh --long help -n "tcping" -- "$@")
-if [ $? -ne 0 ]; then
-    exit 1
-fi
+[ $? -ne 0 ] && exit 1
 eval set -- "$ARGS"
 
 while true; do
@@ -43,13 +41,16 @@ while true; do
     esac
 done
 
-# 剩余的第一个参数是目标地址
 dest="$1"
 [ -z "$dest" ] && usage
 
-# 检查 tcptraceroute 是否安装
+# 检查依赖
 command -v tcptraceroute >/dev/null 2>&1 || {
     echo "Error: tcptraceroute not installed"
+    exit 1
+}
+command -v bc >/dev/null 2>&1 || {
+    echo "Error: bc not installed"
     exit 1
 }
 
@@ -87,12 +88,10 @@ print_stats() {
         loss=0
     fi
 
-    # 计算平均偏差 mdev
     mdev=0
     if [ "$ok" -gt 0 ]; then
         sum_abs=0
         for val in "${rtts[@]}"; do
-            # 使用 bc 条件表达式计算绝对值
             diff=$(echo "scale=4; if ($val > $avg) ($val - $avg) else ($avg - $val)" | bc)
             sum_abs=$(echo "$sum_abs + $diff" | bc)
         done
@@ -101,7 +100,8 @@ print_stats() {
 
     printf -- "--- %s:%s tcping statistics ---\n" "$dest" "$port"
     printf "%d probes, %d success, %d failed (%.2f%% loss)\n" "$sent" "$ok" "$fail" "$loss"
-    printf "round-trip min/avg/max/mdev = %s/%s/%s/%s ms\n" "$(fmt2 "$min")" "$(fmt2 "$avg")" "$(fmt2 "$max")" "$(fmt2 "$mdev")"
+    printf "round-trip min/avg/max/mdev = %s/%s/%s/%s ms\n" \
+        "$(fmt2 "$min")" "$(fmt2 "$avg")" "$(fmt2 "$max")" "$(fmt2 "$mdev")"
     exit 0
 }
 
@@ -109,7 +109,6 @@ trap print_stats INT TERM
 
 [ "$quiet" -eq 0 ] && echo "tcping $dest:$port"
 
-# 初始化统计变量
 sent=0
 ok=0
 min=-1
@@ -118,9 +117,9 @@ sum=0
 seq=0
 
 while :; do
-    # 执行 tcptraceroute 并提取 RTT
     out=$(tcptraceroute -n -f 255 -m 255 -q 1 -w "$timeout" "$dest" "$port" 2>/dev/null)
-    rtt=$(echo "$out" | sed 's/.*] //' | awk '{print $1}')
+
+    rtt=$(grep -Eo '[0-9]+\.[0-9]+ ms' <<< "$out" | head -n1 | awk '{print $1}')
 
     ((sent++))
 
@@ -133,7 +132,6 @@ while :; do
     fi
 
     ((seq++))
-    # 使用 sent 判断是否达到指定次数，修复 -c 不生效问题
     [ "$count" -gt 0 ] && [ "$sent" -ge "$count" ] && break
     sleep "$interval"
 done

@@ -93,9 +93,9 @@ create_single_backup() {
     local backup_dir="/var/log/kuma-backup"
     local backup_name="$(basename "$log_file").backup.gz"
     local backup_path="$backup_dir/$backup_name"
-    
+
     mkdir -p "$backup_dir"
-    
+
     if [ -f "$log_file" ] && [ -s "$log_file" ]; then
         # 压缩备份（会覆盖旧的备份文件）
         if gzip -c "$log_file" > "$backup_path" 2>/dev/null; then
@@ -110,15 +110,15 @@ create_single_backup() {
 rotate_log_with_backup() {
     local log_file="$1"
     local keep_lines=${2:-10000}
-    
+
     if [ -f "$log_file" ] && [ -s "$log_file" ]; then
         # 创建备份（会覆盖旧备份）
         create_single_backup "$log_file"
-        
+
         # 保留最近的行数
         tail -n $keep_lines "$log_file" > "${log_file}.tmp"
         mv "${log_file}.tmp" "$log_file"
-        
+
         return 0
     fi
     return 1
@@ -144,6 +144,13 @@ check_dependencies() {
     # 检查 tcping
     if ! command -v tcping &> /dev/null; then
         missing+=("tcping")
+    fi
+
+    # 检查 docker（仅当配置中存在 docker 模式的任务时才必须）
+    if grep -q "|docker|" "$CONFIG_FILE" 2>/dev/null; then
+        if ! command -v docker &> /dev/null; then
+            missing+=("docker")
+        fi
     fi
 
     if [ ${#missing[@]} -gt 0 ]; then
@@ -176,6 +183,11 @@ install_dependencies() {
         sudo chmod +x /usr/bin/tcping
     fi
 
+    # 检查 docker（不自动安装，仅提示）
+    if ! command -v docker &> /dev/null; then
+        echo "注意：docker 未安装。如要使用 docker 容器监控，请手动安装 docker。"
+    fi
+
     echo "依赖安装完成！"
 }
 
@@ -187,69 +199,69 @@ cleanup_logs() {
     echo "====================================="
     echo "        日志清理工具"
     echo "====================================="
-    
+
     local before_size=$(du -h "$LOG_FILE" 2>/dev/null | cut -f1)
     local before_error_size=$(du -h "$ERROR_LOG" 2>/dev/null | cut -f1)
     local before_debug_size=$(du -h "$DEBUG_LOG" 2>/dev/null | cut -f1)
-    
+
     echo "清理前日志大小:"
     echo "  主日志: $before_size"
     echo "  错误日志: $before_error_size"
     echo "  调试日志: $before_debug_size"
     echo ""
-    
+
     local cleaned=0
-    
+
     # 按大小清理（超过限制时轮转）
     if [ $LOG_MAX_SIZE_MB -gt 0 ]; then
         local max_size_bytes=$((LOG_MAX_SIZE_MB * 1024 * 1024))
-        
+
         for log in "$LOG_FILE" "$ERROR_LOG" "$DEBUG_LOG"; do
             if [ -f "$log" ]; then
                 local current_size=$(stat -c%s "$log" 2>/dev/null || stat -f%z "$log" 2>/dev/null)
                 if [ "$current_size" -gt "$max_size_bytes" ]; then
                     echo "日志文件 $(basename "$log") 超过 ${LOG_MAX_SIZE_MB}MB，正在轮转..."
-                    
+
                     # 轮转日志（自动创建备份并保留最近10000行）
                     rotate_log_with_backup "$log" 10000
-                    
+
                     echo "  ✓ 已备份并截断日志"
                     cleaned=1
                 fi
             fi
         done
     fi
-    
+
     # 显示备份信息
     local backup_dir="/var/log/kuma-backup"
     if [ -d "$backup_dir" ]; then
         echo ""
         echo "当前备份文件:"
         ls -lh "$backup_dir"/*.backup.gz 2>/dev/null | awk '{print "  " $9 ": " $5}' || echo "  无备份文件"
-        
+
         local backup_size=$(du -sh "$backup_dir" 2>/dev/null | cut -f1)
         echo "备份总大小: $backup_size"
     fi
-    
+
     local after_size=$(du -h "$LOG_FILE" 2>/dev/null | cut -f1)
     local after_error_size=$(du -h "$ERROR_LOG" 2>/dev/null | cut -f1)
     local after_debug_size=$(du -h "$DEBUG_LOG" 2>/dev/null | cut -f1)
-    
+
     echo ""
     echo "清理后日志大小:"
     echo "  主日志: $after_size"
     echo "  错误日志: $after_error_size"
     echo "  调试日志: $after_debug_size"
-    
+
     LAST_CLEANUP_DATE=$(date '+%Y-%m-%d %H:%M:%S')
     save_cleanup_config
-    
+
     if [ $cleaned -eq 1 ]; then
         echo "✓ 日志清理完成"
     else
         echo "✓ 无需清理，日志文件大小在限制范围内"
     fi
-    
+
     read -p "按回车键继续..."
 }
 
@@ -267,9 +279,9 @@ configure_cleanup() {
     echo "====================================="
     echo "注：备份策略为只保留一个最新备份文件"
     echo "====================================="
-    
+
     read -p "请选择 [0-5]: " cleanup_choice
-    
+
     case $cleanup_choice in
         1)
             read -p "请输入日志最大大小(MB) (0=不限制): " size
@@ -325,12 +337,12 @@ configure_cleanup() {
                         ((i++))
                     fi
                 done
-                
+
                 read -p "请选择要恢复的备份 [1-${#backup_files[@]}]: " choice
                 if [[ "$choice" =~ ^[0-9]+$ ]] && [ $choice -le ${#backup_files[@]} ]; then
                     local selected_backup="${backup_files[$((choice-1))]}"
                     local log_name=$(basename "$selected_backup" .backup.gz)
-                    
+
                     echo "选择恢复: $log_name"
                     read -p "确认恢复？这将覆盖当前日志 [y/N]: " confirm
                     if [[ "$confirm" =~ ^[Yy]$ ]]; then
@@ -340,7 +352,7 @@ configure_cleanup() {
                             gzip -c "/var/log/$log_name" > "$current_backup"
                             echo "已备份当前日志到: $current_backup"
                         fi
-                        
+
                         # 恢复备份
                         gunzip -c "$selected_backup" > "/var/log/$log_name"
                         echo "✓ 日志已恢复"
@@ -366,23 +378,23 @@ auto_cleanup_check() {
     if [ "$AUTO_CLEANUP_ENABLED" != true ]; then
         return
     fi
-    
+
     # 检查上次清理时间，如果超过1天则执行清理
     local last_cleanup_ts=0
     if [ -n "$LAST_CLEANUP_DATE" ]; then
         last_cleanup_ts=$(date -d "$LAST_CLEANUP_DATE" +%s 2>/dev/null || echo 0)
     fi
-    
+
     local current_ts=$(date +%s)
     local days_since_cleanup=$(( (current_ts - last_cleanup_ts) / 86400 ))
-    
+
     if [ $days_since_cleanup -ge 1 ]; then
         echo "[$(date '+%F %T')] 执行自动日志清理..." >> "$LOG_FILE"
-        
+
         # 按大小清理
         if [ $LOG_MAX_SIZE_MB -gt 0 ]; then
             local max_size_bytes=$((LOG_MAX_SIZE_MB * 1024 * 1024))
-            
+
             for log in "$LOG_FILE" "$ERROR_LOG" "$DEBUG_LOG"; do
                 if [ -f "$log" ]; then
                     local current_size=$(stat -c%s "$log" 2>/dev/null || stat -f%z "$log" 2>/dev/null)
@@ -394,7 +406,7 @@ auto_cleanup_check() {
                 fi
             done
         fi
-        
+
         LAST_CLEANUP_DATE=$(date '+%Y-%m-%d %H:%M:%S')
         save_cleanup_config
         echo "[$(date '+%F %T')] 自动日志清理完成" >> "$LOG_FILE"
@@ -425,6 +437,24 @@ get_tcp_ping() {
     awk -F'=' '{print $2}' | \
     awk -F'/' '{print $2}' | \
     awk '{print $1}'
+}
+
+# 新增：获取 Docker 容器状态（返回 0 表示 up，空字符串表示 down）
+get_docker_status() {
+    local container="$1"
+    if ! command -v docker &> /dev/null; then
+        echo "docker 未安装" >&2
+        echo ""
+        return 1
+    fi
+    # 精确匹配容器名称（区分大小写），检查是否在运行中
+    if docker ps --filter "name=^${container}$" --filter "status=running" --format "{{.Names}}" | grep -qx "^${container}$"; then
+        echo "0"   # 运行中，ping 值设为 0
+        return 0
+    else
+        echo ""   # 未运行或不存在
+        return 1
+    fi
 }
 
 # =========================
@@ -596,7 +626,7 @@ view_logs() {
                     create_single_backup "$LOG_FILE"
                     create_single_backup "$ERROR_LOG"
                     create_single_backup "$DEBUG_LOG"
-                    
+
                     > "$LOG_FILE"
                     > "$ERROR_LOG"
                     > "$DEBUG_LOG"
@@ -734,16 +764,22 @@ add_task() {
 
     read -p "监控名称: " name
     read -p "Kuma API地址: " api
-    read -p "目标IP/域名: " target
-    read -p "模式 [1]icmp [2]tcping (默认: 1): " mode_choice
+    read -p "模式 [1]icmp [2]tcping [3]docker (默认: 1): " mode_choice
     case $mode_choice in
         2) mode="tcping" ;;
+        3) mode="docker" ;;
         *) mode="icmp" ;;
     esac
 
     port="0"
     if [ "$mode" = "tcping" ]; then
         read -p "TCP端口: " port
+        target=""
+        read -p "目标IP/域名: " target
+    elif [ "$mode" = "docker" ]; then
+        read -p "Docker容器名称: " target
+    else
+        read -p "目标IP/域名: " target
     fi
 
     read -p "监控间隔(秒, 默认60): " interval
@@ -800,10 +836,11 @@ edit_task() {
     target=${new_target:-$target}
 
     echo "原模式: $mode"
-    read -p "新模式 [1]icmp [2]tcping: " mode_choice
+    read -p "新模式 [1]icmp [2]tcping [3]docker: " mode_choice
     if [ -n "$mode_choice" ]; then
         case $mode_choice in
             2) mode="tcping" ;;
+            3) mode="docker" ;;
             1) mode="icmp" ;;
         esac
     fi
@@ -913,8 +950,13 @@ run_daemon() {
             # 执行检测
             if [ "$MODE" = "icmp" ]; then
                 PING=$(get_icmp_ping "$TARGET")
-            else
+            elif [ "$MODE" = "tcping" ]; then
                 PING=$(get_tcp_ping "$TARGET" "$PORT")
+            elif [ "$MODE" = "docker" ]; then
+                PING=$(get_docker_status "$TARGET")
+            else
+                echo "[$(date '+%F %T')] [$NAME] 未知模式: $MODE，跳过" >> "$ERROR_LOG"
+                continue
             fi
 
             # 状态判断
@@ -928,7 +970,11 @@ run_daemon() {
             fi
 
             # 输出检测结果到日志
-            echo "[$(date '+%F %T')] [$NAME] 检测: $TARGET -> $STATUS (${PING:-timeout}ms)" >> "$LOG_FILE"
+            if [ "$MODE" = "docker" ]; then
+                echo "[$(date '+%F %T')] [$NAME] 检测: 容器 $TARGET -> $STATUS" >> "$LOG_FILE"
+            else
+                echo "[$(date '+%F %T')] [$NAME] 检测: $TARGET -> $STATUS (${PING:-timeout}ms)" >> "$LOG_FILE"
+            fi
 
             # 串行推送：每个任务检测完成后立即推送（带5次重试）
             push_to_kuma "$API" "$STATUS" "$MSG" "$PING" "$NAME"

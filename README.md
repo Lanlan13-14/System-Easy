@@ -74,11 +74,11 @@ sudo systemctl stop kuma-push.service 2>/dev/null; sudo systemctl disable kuma-p
 ```
 #### 安装Node_exporter
 ```
-curl -sSL https://raw.githubusercontent.com/Lanlan13-14/System-Easy/refs/heads/main/node_exporter_install.sh | sudo bash
+curl -sSL -o node_exporter_install.sh https://raw.githubusercontent.com/Lanlan13-14/System-Easy/refs/heads/main/node_exporter_install.sh && sudo bash node_exporter_install.sh
 ```
 #### 卸载Node_exporter
 ```
-curl -sSL https://raw.githubusercontent.com/Lanlan13-14/System-Easy/refs/heads/main/node_exporter_uninstall.sh | sudo bash
+curl -sSL -o node_exporter_uninstall.sh https://raw.githubusercontent.com/Lanlan13-14/System-Easy/refs/heads/main/node_exporter_uninstall.sh && sudo bash node_exporter_uninstall.sh
 ```
 
 ### 特别感谢

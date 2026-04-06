@@ -72,6 +72,15 @@ sudo wget -O /usr/local/bin/kuma_multi_push.sh https://raw.githubusercontent.com
 ```
 sudo systemctl stop kuma-push.service 2>/dev/null; sudo systemctl disable kuma-push.service 2>/dev/null; sudo rm -f /etc/systemd/system/kuma-push.service; sudo rm -f /usr/local/bin/kuma-ping /usr/local/bin/kuma_multi_push.sh; sudo rm -rf /usr/local/etc/kuma_tasks.conf /var/lib/kuma-push /var/log/kuma-push.log /var/log/kuma-push.errors.log /var/log/kuma-push.debug.log; sudo systemctl daemon-reload; echo "卸载完成！"
 ```
+#### 安装Node_exporter
+```
+curl -sSL https://raw.githubusercontent.com/Lanlan13-14/System-Easy/refs/heads/main/node_exporter_install.sh | sudo bash
+```
+### 卸载Node_exporter
+```
+curl -sSL https://raw.githubusercontent.com/Lanlan13-14/System-Easy/refs/heads/main/node_exporter_uninstall.sh | sudo bash
+```
+
 ### 特别感谢
 [byJoey](https://github.com/byJoey/Actions-bbr-v3)
 >

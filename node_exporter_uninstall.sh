@@ -1,5 +1,4 @@
 #!/bin/bash
-set -e
 
 # 颜色定义
 RED='\033[0;31m'
@@ -20,13 +19,13 @@ fi
 info "Starting uninstallation of Node Exporter and Nginx proxy..."
 
 # 1. 停止并禁用 Node Exporter 服务
-if systemctl list-units --full -all | grep -q "node_exporter.service"; then
+if systemctl list-units --full -all 2>/dev/null | grep -q "node_exporter.service"; then
     info "Stopping node_exporter service..."
     systemctl stop node_exporter.service 2>/dev/null || true
     systemctl disable node_exporter.service 2>/dev/null || true
     info "Removing node_exporter service file..."
     rm -f /etc/systemd/system/node_exporter.service
-    systemctl daemon-reload
+    systemctl daemon-reload 2>/dev/null || true
 else
     warn "node_exporter service not found"
 fi
@@ -43,8 +42,10 @@ fi
 if [[ -f "/etc/nginx/conf.d/node_exporter.conf" ]]; then
     info "Removing Nginx configuration..."
     rm -f /etc/nginx/conf.d/node_exporter.conf
-    info "Testing and reloading Nginx..."
-    nginx -t 2>/dev/null && systemctl reload nginx || warn "Nginx config test failed, please check manually"
+    if command -v nginx &>/dev/null; then
+        info "Testing and reloading Nginx..."
+        nginx -t 2>/dev/null && systemctl reload nginx 2>/dev/null || warn "Nginx config test failed, please check manually"
+    fi
 else
     warn "Nginx configuration not found"
 fi
@@ -57,20 +58,22 @@ else
     warn "htpasswd file not found"
 fi
 
-# 5. 可选：删除下载的临时文件
+# 5. 清理临时文件
 if [[ -f "/tmp/node_exporter.tar.gz" ]]; then
     info "Cleaning up temporary files..."
     rm -f /tmp/node_exporter.tar.gz
 fi
 
-# 清理解压目录（如果存在）
 if [[ -d "/tmp/node_exporter-1.10.2.linux-amd64" ]]; then
     rm -rf /tmp/node_exporter-1.10.2.linux-amd64
 fi
 
-# 6. 询问是否卸载 Nginx（可选）
+# 6. 询问是否卸载 Nginx（一定会执行到这里）
 echo ""
+echo -e "${YELLOW}========================================${NC}"
 read -p "Do you want to completely remove Nginx as well? (y/n): " remove_nginx
+echo -e "${YELLOW}========================================${NC}"
+
 if [[ "$remove_nginx" =~ ^[Yy]$ ]]; then
     info "Removing Nginx..."
     if command -v apt &>/dev/null; then
@@ -91,16 +94,16 @@ else
     info "Nginx kept intact (only Node Exporter config removed)"
 fi
 
-# 7. 清理端口占用提醒
+# 7. 端口检查
 echo ""
 info "Checking if ports are still listening..."
-if ss -tlnp | grep -q ":9100 "; then
+if ss -tlnp 2>/dev/null | grep -q ":9100 "; then
     warn "Port 9100 is still in use by another process"
 else
     info "Port 9100 is free"
 fi
 
-if ss -tlnp | grep -q ":9101 "; then
+if ss -tlnp 2>/dev/null | grep -q ":9101 "; then
     warn "Port 9101 is still in use by another process"
 else
     info "Port 9101 is free"

@@ -7,10 +7,10 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
-# 打印信息函数
-info() { echo -e "${GREEN}[INFO]${NC} $1"; }
-warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
-error() { echo -e "${RED}[ERROR]${NC} $1"; exit 1; }
+# 打印信息函数（输出到 stderr，避免污染函数返回值）
+info() { echo -e "${GREEN}[INFO]${NC} $1" >&2; }
+warn() { echo -e "${YELLOW}[WARN]${NC} $1" >&2; }
+error() { echo -e "${RED}[ERROR]${NC} $1" >&2; exit 1; }
 
 # 检查命令是否存在
 check_cmd() { command -v "$1" &>/dev/null; }
@@ -35,10 +35,9 @@ get_download_url() {
     local file="node_exporter-${version}.linux-amd64.tar.gz"
     local github_url="https://github.com/prometheus/node_exporter/releases/download/v${version}/${file}"
 
-    # 检测地理位置 - 使用 ipapi.co 替代原有 API
+    # 检测地理位置 - 使用 ipapi.co
     info "Detecting geographic location..."
     local country
-    # 尝试获取国家代码（超时 3 秒，失败则返回空）
     country=$(curl -s --max-time 3 https://ipapi.co/country/ 2>/dev/null || true)
 
     if [[ "$country" == "CN" ]]; then
@@ -47,13 +46,13 @@ get_download_url() {
         if [[ "$use_proxy" =~ ^[Yy]$ ]]; then
             read -p "Enter acceleration proxy prefix (e.g., https://ghproxy.com/ ): " proxy_prefix
             proxy_prefix="${proxy_prefix%/}"
+            # 只输出 URL 到 stdout，不输出其他内容
             echo "${proxy_prefix}/${github_url}"
-        else
-            echo "$github_url"
+            return
         fi
-    else
-        echo "$github_url"
     fi
+    # 只输出 URL 到 stdout
+    echo "$github_url"
 }
 
 # 安装 Node Exporter
@@ -121,7 +120,7 @@ configure_nginx() {
 
     # 生成密码（使用 htpasswd 或 openssl）
     if check_cmd htpasswd; then
-        printf "$password\n$password\n" | sudo htpasswd -c "$auth_file" "$username" 2>/dev/null
+        echo "$password" | sudo htpasswd -i -c "$auth_file" "$username"
     elif check_cmd openssl; then
         local hashed
         hashed=$(openssl passwd -6 "$password")

@@ -76,7 +76,7 @@ sudo systemctl stop kuma-push.service 2>/dev/null; sudo systemctl disable kuma-p
 ```
 curl -sSL https://raw.githubusercontent.com/Lanlan13-14/System-Easy/refs/heads/main/node_exporter_install.sh | sudo bash
 ```
-### 卸载Node_exporter
+#### 卸载Node_exporter
 ```
 curl -sSL https://raw.githubusercontent.com/Lanlan13-14/System-Easy/refs/heads/main/node_exporter_uninstall.sh | sudo bash
 ```

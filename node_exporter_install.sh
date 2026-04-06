@@ -1,5 +1,5 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
 # 颜色定义
 RED='\033[0;31m'
@@ -7,7 +7,7 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
-# 打印信息函数（输出到 stderr，避免污染函数返回值）
+# 打印信息函数
 info() { echo -e "${GREEN}[INFO]${NC} $1" >&2; }
 warn() { echo -e "${YELLOW}[WARN]${NC} $1" >&2; }
 error() { echo -e "${RED}[ERROR]${NC} $1" >&2; exit 1; }
@@ -19,39 +19,37 @@ check_cmd() { command -v "$1" &>/dev/null; }
 install_deps() {
     if check_cmd apt; then
         info "Detected apt-based system"
-        sudo apt update
-        sudo apt install -y wget curl tar nginx apache2-utils
+        sudo apt update || error "apt update failed"
+        sudo apt install -y wget curl tar nginx apache2-utils || error "apt install failed"
     elif check_cmd dnf; then
         info "Detected dnf-based system"
-        sudo dnf install -y wget curl tar nginx httpd-tools
+        sudo dnf install -y wget curl tar nginx httpd-tools || error "dnf install failed"
     else
         error "Unsupported package manager. Only apt/dnf are supported."
     fi
 }
 
-# 获取下载链接（仅 GitHub，CN 可选加速）
+# 获取下载链接
 get_download_url() {
     local version="1.10.2"
     local file="node_exporter-${version}.linux-amd64.tar.gz"
     local github_url="https://github.com/prometheus/node_exporter/releases/download/v${version}/${file}"
 
-    # 检测地理位置 - 使用 ipapi.co
     info "Detecting geographic location..."
     local country
     country=$(curl -s --max-time 3 https://ipapi.co/country/ 2>/dev/null || true)
 
     if [[ "$country" == "CN" ]]; then
         warn "Detected China mainland. GitHub downloads may be slow."
-        read -p "Do you want to use a GitHub acceleration proxy? (y/n): " use_proxy
+        read -r -p "Do you want to use a GitHub acceleration proxy? (y/n) [n]: " use_proxy
+        use_proxy=${use_proxy:-n}
         if [[ "$use_proxy" =~ ^[Yy]$ ]]; then
-            read -p "Enter acceleration proxy prefix (e.g., https://ghproxy.com/ ): " proxy_prefix
+            read -r -p "Enter acceleration proxy prefix (e.g., https://ghproxy.com/ ): " proxy_prefix
             proxy_prefix="${proxy_prefix%/}"
-            # 只输出 URL 到 stdout，不输出其他内容
             echo "${proxy_prefix}/${github_url}"
             return
         fi
     fi
-    # 只输出 URL 到 stdout
     echo "$github_url"
 }
 
@@ -62,10 +60,10 @@ install_node_exporter() {
     local target="/tmp/node_exporter.tar.gz"
 
     info "Downloading Node Exporter from: $download_url"
-    curl -fL -o "$target" "$download_url"
+    curl -fL -o "$target" "$download_url" || error "Download failed"
 
     info "Extracting Node Exporter..."
-    tar -zxf "$target" -C /tmp
+    tar -zxf "$target" -C /tmp || error "Extraction failed"
 
     local extract_dir="/tmp/node_exporter-1.10.2.linux-amd64"
     local install_dir="/node_exporter"
@@ -76,7 +74,6 @@ install_node_exporter() {
     fi
     sudo cp -r "$extract_dir" "$install_dir"
 
-    # 创建 systemd 服务（监听本地 9100）
     local service_file="/etc/systemd/system/node_exporter.service"
     sudo tee "$service_file" > /dev/null <<EOF
 [Unit]
@@ -94,18 +91,21 @@ WantedBy=multi-user.target
 EOF
 
     sudo systemctl daemon-reload
-    sudo systemctl enable --now node_exporter.service
+    sudo systemctl enable --now node_exporter.service || error "Failed to start node_exporter"
     info "Node Exporter started on 127.0.0.1:9100"
+
+    # 清理临时文件
+    rm -f "$target"
+    rm -rf "$extract_dir"
 }
 
-# 配置 Nginx 反向代理（端口 9101，密码认证）
+# 配置 Nginx 反向代理
 configure_nginx() {
+    local username="$1"
     local auth_file="/etc/nginx/.htpasswd"
     local nginx_conf="/etc/nginx/conf.d/node_exporter.conf"
 
-    # 创建密码文件
     info "Setting up HTTP basic authentication for Nginx"
-    read -p "Enter username for metrics access: " username
     while true; do
         read -s -p "Enter password: " password
         echo
@@ -118,7 +118,6 @@ configure_nginx() {
         fi
     done
 
-    # 生成密码（使用 htpasswd 或 openssl）
     if check_cmd htpasswd; then
         echo "$password" | sudo htpasswd -i -c "$auth_file" "$username"
     elif check_cmd openssl; then
@@ -129,7 +128,6 @@ configure_nginx() {
         error "Neither htpasswd nor openssl found. Please install apache2-utils or httpd-tools."
     fi
 
-    # 写入 Nginx 配置
     sudo tee "$nginx_conf" > /dev/null <<EOF
 server {
     listen 9101;
@@ -146,15 +144,17 @@ server {
 }
 EOF
 
-    # 测试并重载 Nginx
     sudo nginx -t || error "Nginx configuration test failed"
     sudo systemctl enable --now nginx
-    sudo systemctl restart nginx
+    sudo systemctl restart nginx || error "Failed to restart Nginx"
     info "Nginx reverse proxy configured on port 9101 with basic auth"
+
+    echo "$username"
 }
 
 # 打印最终访问信息
 print_connection_info() {
+    local username="$1"
     local ip_addr
     ip_addr=$(hostname -I | awk '{print $1}')
     if [[ -z "$ip_addr" ]]; then
@@ -178,8 +178,10 @@ print_connection_info() {
 main() {
     install_deps
     install_node_exporter
-    configure_nginx
-    print_connection_info
+    read -r -p "Enter username for metrics access [admin]: " username
+    username=${username:-admin}
+    username=$(configure_nginx "$username")
+    print_connection_info "$username"
 }
 
 main "$@"

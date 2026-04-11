@@ -55,6 +55,7 @@ get_download_url() {
 
 # 安装 Node Exporter
 install_node_exporter() {
+    local enable_ip_collect="$1"
     local download_url
     download_url=$(get_download_url)
     local target="/tmp/node_exporter.tar.gz"
@@ -74,8 +75,30 @@ install_node_exporter() {
     fi
     sudo cp -r "$extract_dir" "$install_dir"
 
+    # 构建 systemd service 文件
     local service_file="/etc/systemd/system/node_exporter.service"
-    sudo tee "$service_file" > /dev/null <<EOF
+    
+    if [[ "$enable_ip_collect" == "yes" ]]; then
+        info "Configuring node_exporter with textfile collector for IP metrics"
+        sudo tee "$service_file" > /dev/null <<EOF
+[Unit]
+Description=Node Exporter
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+User=root
+ExecStart=${install_dir}/node_exporter \\
+    --web.listen-address="127.0.0.1:9100" \\
+    --collector.textfile.directory="/var/lib/node_exporter/textfile"
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    else
+        info "Configuring node_exporter without textfile collector"
+        sudo tee "$service_file" > /dev/null <<EOF
 [Unit]
 Description=Node Exporter
 Wants=network-online.target
@@ -89,6 +112,7 @@ Restart=always
 [Install]
 WantedBy=multi-user.target
 EOF
+    fi
 
     sudo systemctl daemon-reload
     sudo systemctl enable --now node_exporter.service || error "Failed to start node_exporter"
@@ -97,6 +121,81 @@ EOF
     # 清理临时文件
     rm -f "$target"
     rm -rf "$extract_dir"
+}
+
+# 配置 IP 采集
+setup_ip_collection() {
+    info "Setting up IP collection system..."
+    
+    # 创建 textfile 目录
+    sudo mkdir -p /var/lib/node_exporter/textfile
+    sudo chmod 755 /var/lib/node_exporter/textfile
+    
+    # 创建脚本目录
+    sudo mkdir -p /etc/node-exporter-ip
+    
+    # 创建 IP 采集脚本
+    sudo tee /etc/node-exporter-ip/update-ip.sh > /dev/null <<'EOF'
+#!/bin/bash
+
+# 获取 IPv4 出站 IP
+IPV4=$(ip route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src") print $(i+1)}')
+# 获取 IPv6 出站 IP
+IPV6=$(ip -6 route get 2606:4700:4700::1111 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src") print $(i+1)}')
+
+# 写入 prometheus 格式文件
+cat > /var/lib/node_exporter/textfile/node_ip.prom <<PROM
+# HELP node_ip_info Egress IP address of the node
+# TYPE node_ip_info gauge
+PROM
+
+# 添加 IPv4 指标（如果不为空）
+if [[ -n "$IPV4" ]]; then
+    echo "node_ip_info{ip=\"$IPV4\",family=\"ipv4\"} 1" >> /var/lib/node_exporter/textfile/node_ip.prom
+fi
+
+# 添加 IPv6 指标（如果不为空）
+if [[ -n "$IPV6" ]]; then
+    echo "node_ip_info{ip=\"$IPV6\",family=\"ipv6\"} 1" >> /var/lib/node_exporter/textfile/node_ip.prom
+fi
+EOF
+
+    sudo chmod +x /etc/node-exporter-ip/update-ip.sh
+    
+    # 创建 systemd service
+    sudo tee /etc/systemd/system/node-ip.service > /dev/null <<EOF
+[Unit]
+Description=Update Node Exporter IP metrics
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/etc/node-exporter-ip/update-ip.sh
+EOF
+
+    # 创建 systemd timer（每60秒执行一次）
+    sudo tee /etc/systemd/system/node-ip.timer > /dev/null <<EOF
+[Unit]
+Description=Timer for Node Exporter IP metrics update
+
+[Timer]
+OnBootSec=20s
+OnUnitActiveSec=60s
+
+[Install]
+WantedBy=timers.target
+EOF
+
+    # 启用 timer
+    sudo systemctl daemon-reload
+    sudo systemctl enable node-ip.timer
+    sudo systemctl start node-ip.timer
+    
+    # 立即执行一次生成指标
+    sudo /etc/node-exporter-ip/update-ip.sh
+    
+    info "IP collection system configured and started"
 }
 
 # 配置 Nginx 反向代理
@@ -155,6 +254,7 @@ EOF
 # 打印最终访问信息
 print_connection_info() {
     local username="$1"
+    local enable_ip_collect="$2"
     local ip_addr
     ip_addr=$(hostname -I | awk '{print $1}')
     if [[ -z "$ip_addr" ]]; then
@@ -171,17 +271,77 @@ print_connection_info() {
     echo "Password: (the one you entered)"
     echo ""
     echo "Test with: curl -u '$username' http://${ip_addr}:9101/metrics"
+    
+    # 打印 IP 采集相关信息
+    if [[ "$enable_ip_collect" == "yes" ]]; then
+        echo ""
+        echo -e "${GREEN}--- IP Collection Status ---${NC}"
+        
+        # 显示当前采集的 IP 指标文件
+        if [[ -f /var/lib/node_exporter/textfile/node_ip.prom ]]; then
+            echo -e "${GREEN}IP metrics file created:${NC}"
+            cat /var/lib/node_exporter/textfile/node_ip.prom | sed 's/^/  /'
+        else
+            echo -e "${YELLOW}IP metrics file not yet created (will be generated shortly)${NC}"
+        fi
+        
+        # 显示 systemd timer 状态
+        echo ""
+        echo -e "${GREEN}Systemd timer status:${NC}"
+        systemctl status node-ip.timer --no-pager -l 2>/dev/null | grep -E "Active:|Loaded:" | sed 's/^/  /' || echo "  Timer not active"
+        
+        echo ""
+        echo -e "${GREEN}Prometheus query examples:${NC}"
+        echo "  node_ip_info"
+        echo "  node_ip_info{family=\"ipv4\"}"
+        echo "  node_ip_info{family=\"ipv6\"}"
+        
+        echo ""
+        echo -e "${GREEN}IP Collection Components:${NC}"
+        echo "  Script: /etc/node-exporter-ip/update-ip.sh"
+        echo "  Metrics: /var/lib/node_exporter/textfile/node_ip.prom"
+        echo "  Service: node-ip.service"
+        echo "  Timer:   node-ip.timer (runs every 60s)"
+    fi
+    
+    echo ""
     echo "=============================================="
 }
 
 # 主函数
 main() {
     install_deps
-    install_node_exporter
+    
+    # 询问是否启用 IP 采集功能
+    echo ""
+    echo -e "${YELLOW}Do you want to enable automatic IP collection?${NC}"
+    echo "This will add node_ip_info metrics showing your egress IP addresses."
+    read -r -p "Enable IP collection? (y/n) [y]: " enable_ip
+    enable_ip=${enable_ip:-y}
+    
+    local enable_ip_collect="no"
+    if [[ "$enable_ip" =~ ^[Yy]$ ]]; then
+        enable_ip_collect="yes"
+        info "IP collection will be enabled"
+    else
+        info "IP collection will NOT be enabled"
+    fi
+    
+    # 安装 node_exporter（传入是否启用 IP 采集）
+    install_node_exporter "$enable_ip_collect"
+    
+    # 如果需要，配置 IP 采集
+    if [[ "$enable_ip_collect" == "yes" ]]; then
+        setup_ip_collection
+    fi
+    
+    # 配置 Nginx
     read -r -p "Enter username for metrics access [admin]: " username
     username=${username:-admin}
     username=$(configure_nginx "$username")
-    print_connection_info "$username"
+    
+    # 打印最终信息
+    print_connection_info "$username" "$enable_ip_collect"
 }
 
 main "$@"

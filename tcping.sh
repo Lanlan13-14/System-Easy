@@ -26,7 +26,6 @@ EOF
 exit 0
 }
 
-# getopt 解析参数
 ARGS=$(getopt -o c:i:p:t:q46h --long help -n "tcping" -- "$@")
 [ $? -ne 0 ] && exit 1
 eval set -- "$ARGS"
@@ -49,11 +48,9 @@ done
 dest="$1"
 [ -z "$dest" ] && usage
 
-# 检查依赖
 command -v tcptraceroute >/dev/null 2>&1 || { echo "Error: tcptraceroute not installed"; exit 1; }
 command -v bc >/dev/null 2>&1 || { echo "Error: bc not installed"; exit 1; }
 
-# 如果指定了 IP 版本，解析域名
 if [[ "$ipver" == "4" ]]; then
     resolved=$(getent ahosts "$dest" | awk '$2=="STREAM" && $1 ~ /\./ {print $1; exit}')
 elif [[ "$ipver" == "6" ]]; then
@@ -114,18 +111,18 @@ while :; do
     out=$(tcptraceroute -n -f 255 -m 255 -q 1 -w "$timeout" "$dest" "$port" 2>&1)
     last_line=$(echo "$out" | tail -n1)
     
-    ((sent++))  # 只在这里增加一次 sent
+    ((sent++))
     
-    if echo "$last_line" | grep -q "ms" && ! echo "$last_line" | grep -q "\*"; then
-        rtt=$(echo "$last_line" | grep -oE '[0-9]+\.[0-9]+ ms' | head -n1 | awk '{print $1}')
-        
-        # 过滤掉 255 的假数据
-        if [[ "$rtt" =~ ^[0-9.]+$ ]] && (( $(echo "$rtt < 255" | bc -l 2>/dev/null || echo "0") )); then
+    # 判断成功：看到 [open] 或到达目标 IP
+    if echo "$last_line" | grep -q "\[open\]" || echo "$last_line" | grep -q "$dest"; then
+        # 取最后一个 RTT（到达目标的完整延迟）
+        rtt=$(echo "$last_line" | awk '{for(i=NF;i>=1;i--) if($i ~ /ms/) {print $(i-1); exit}}')
+        if [[ -n "$rtt" ]]; then
             rtt_fmt=$(fmt2 "$rtt")
             [ "$quiet" -eq 0 ] && echo "connected to $dest:$port, seq=$seq time=${rtt_fmt} ms"
             update_stats "$rtt"
         else
-            [ "$quiet" -eq 0 ] && echo "no response from $dest:$port, seq=$seq"
+            [ "$quiet" -eq 0 ] && echo "connected to $dest:$port, seq=$seq (no RTT data)"
         fi
     else
         [ "$quiet" -eq 0 ] && echo "no response from $dest:$port, seq=$seq"

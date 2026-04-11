@@ -111,16 +111,26 @@ sum=0
 seq=0
 
 while :; do
-    out=$(tcptraceroute -n -f 255 -m 255 -q 1 -w "$timeout" "$dest" "$port" 2>/dev/null)
-    rtt=$(echo "$out" | grep -Eo '[0-9]+\.[0-9]+ ms' | head -n1 | awk '{print $1}')
-    ((sent++))
-    if [[ "$rtt" =~ ^[0-9.]+$ ]]; then
-        rtt_fmt=$(fmt2 "$rtt")
-        [ "$quiet" -eq 0 ] && echo "connected to $dest:$port, seq=$seq time=${rtt_fmt} ms"
-        update_stats "$rtt"
+    out=$(tcptraceroute -n -f 255 -m 255 -q 1 -w "$timeout" "$dest" "$port" 2>&1)
+    last_line=$(echo "$out" | tail -n1)
+    
+    ((sent++))  # 只在这里增加一次 sent
+    
+    if echo "$last_line" | grep -q "ms" && ! echo "$last_line" | grep -q "\*"; then
+        rtt=$(echo "$last_line" | grep -oE '[0-9]+\.[0-9]+ ms' | head -n1 | awk '{print $1}')
+        
+        # 过滤掉 255 的假数据
+        if [[ "$rtt" =~ ^[0-9.]+$ ]] && (( $(echo "$rtt < 255" | bc -l 2>/dev/null || echo "0") )); then
+            rtt_fmt=$(fmt2 "$rtt")
+            [ "$quiet" -eq 0 ] && echo "connected to $dest:$port, seq=$seq time=${rtt_fmt} ms"
+            update_stats "$rtt"
+        else
+            [ "$quiet" -eq 0 ] && echo "no response from $dest:$port, seq=$seq"
+        fi
     else
         [ "$quiet" -eq 0 ] && echo "no response from $dest:$port, seq=$seq"
     fi
+    
     ((seq++))
     [ "$count" -gt 0 ] && [ "$sent" -ge "$count" ] && break
     sleep "$interval"

@@ -422,24 +422,33 @@ get_icmp_ping() {
     grep "time=" | awk -F'time=' '{print $2}' | awk '{print $1}'
 }
 
+# 改进后的 tcping 检测：只发一个探测包 (-c 1)，超时10秒 (-w 10)
+# 收到 "1 success" 则返回平均延迟，否则返回空（down）
 get_tcp_ping() {
     if ! command -v tcping &> /dev/null; then
         echo "tcping 未安装" >&2
         return 1
     fi
 
-    RESULT=$(tcping -p "$2" "$1" -c 3 2>/dev/null)
+    # 发送1个探测包，等待最多10秒
+    local result
+    result=$(tcping -p "$2" "$1" -c 1 -w 10 2>/dev/null)
 
-    echo "$RESULT" | grep -q "round-trip" || return 1
-
-    echo "$RESULT" | \
-    grep "round-trip" | \
-    awk -F'=' '{print $2}' | \
-    awk -F'/' '{print $2}' | \
-    awk '{print $1}'
+    # 检查是否成功收到响应
+    if echo "$result" | grep -q "1 success"; then
+        # 提取平均延迟
+        local avg
+        avg=$(echo "$result" | grep "round-trip" | awk -F'=' '{print $2}' | awk -F'/' '{print $2}' | awk '{print $1}')
+        if [ -n "$avg" ]; then
+            echo "$avg"
+            return 0
+        fi
+    fi
+    # 不通或超时
+    return 1
 }
 
-# 新增：获取 Docker 容器状态（返回 0 表示 up，空字符串表示 down）
+# 获取 Docker 容器状态（返回 0 表示 up，空字符串表示 down）
 get_docker_status() {
     local container="$1"
     if ! command -v docker &> /dev/null; then

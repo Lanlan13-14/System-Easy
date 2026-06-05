@@ -2166,10 +2166,10 @@ while true; do
     echo -e "${YELLOW}[6]${NC} SSH综合管理 🔒           ${YELLOW}[15]${NC} SWAP管理 💾"
     echo -e "${YELLOW}[7]${NC} 卸载脚本 🗑️              ${YELLOW}[16]${NC} 网络排查工具 🔧"
     echo -e "${YELLOW}[8]${NC} 设置时区与时间同步 ⏰     ${YELLOW}[17]${NC} DDNS管理 🌐"
-    echo -e "${YELLOW}[9]${NC} 更新脚本 📥              ${YELLOW}[18]${NC} GitHub镜像加速 ⚡"
+    echo -e "${YELLOW}[99]${NC} 更新脚本 📥             ${YELLOW}[18]${NC} GitHub镜像加速 ⚡"
     echo -e "${YELLOW}[0]${NC} 退出 🚪"
     echo ""
-    read -rp "请输入您的选择 [0-18]: " main_choice
+    read -rp "请输入您的选择 [0-18/99]: " main_choice
 
     case $main_choice in
         1) install_tools ;;
@@ -2180,7 +2180,7 @@ while true; do
         6) ssh_integrated_menu ;;
         7) uninstall_script ;;
         8) set_timezone ;;
-        9) update_script ;;
+        99) update_script ;;
         10) check_memory_usage ;;  # 内存占用最大
         11) check_port_usage ;;
         12) check_cpu_usage ;;

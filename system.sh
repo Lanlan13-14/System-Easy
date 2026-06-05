@@ -496,8 +496,48 @@ EOF
                     chattr +i /etc/resolv.conf 2>/dev/null && echo "已设置DNS文件保护" || echo "警告：无法设置文件保护"
                     echo -e "${GREEN}DNS已永久修改 🎉${NC}"
                 fi
-                echo "测试DNS解析..."
-                nslookup baidu.com 2>/dev/null || dig baidu.com 2>/dev/null || echo "DNS测试失败，请检查配置"
+                echo "验证DNS解析..."
+                dns_test_ok=false
+                if command -v getent >/dev/null 2>&1; then
+                    for test_domain in github.com cloudflare.com baidu.com; do
+                        if getent ahosts "$test_domain" >/dev/null 2>&1; then
+                            dns_test_ok=true
+                            echo -e "${GREEN}DNS解析验证通过：$test_domain${NC}"
+                            break
+                        fi
+                    done
+                fi
+                if ! $dns_test_ok && command -v resolvectl >/dev/null 2>&1; then
+                    for test_domain in github.com cloudflare.com baidu.com; do
+                        if resolvectl query "$test_domain" >/dev/null 2>&1; then
+                            dns_test_ok=true
+                            echo -e "${GREEN}DNS解析验证通过：$test_domain${NC}"
+                            break
+                        fi
+                    done
+                fi
+                if ! $dns_test_ok && command -v nslookup >/dev/null 2>&1; then
+                    for test_domain in github.com cloudflare.com baidu.com; do
+                        if nslookup "$test_domain" >/dev/null 2>&1; then
+                            dns_test_ok=true
+                            echo -e "${GREEN}DNS解析验证通过：$test_domain${NC}"
+                            break
+                        fi
+                    done
+                fi
+                if ! $dns_test_ok && command -v dig >/dev/null 2>&1; then
+                    for test_domain in github.com cloudflare.com baidu.com; do
+                        if dig +time=3 +tries=1 "$test_domain" >/dev/null 2>&1; then
+                            dns_test_ok=true
+                            echo -e "${GREEN}DNS解析验证通过：$test_domain${NC}"
+                            break
+                        fi
+                    done
+                fi
+                if ! $dns_test_ok; then
+                    echo -e "${YELLOW}提示：DNS配置已写入，但当前环境未能完成解析验证。${NC}"
+                    echo -e "${YELLOW}这通常是因为缺少 nslookup/dig/getent、网络暂不可达、域名被拦截或缓存未刷新，并不代表DNS设置失败。${NC}"
+                fi
                 read -rp "按回车键继续..." _
                 ;;
             3)
@@ -1613,27 +1653,37 @@ EOF
 
                 # 验证配置文件语法
                 echo -e "${CYAN}正在验证配置文件语法...${NC}"
-                if chronyd -Q -q -t 1 >/dev/null 2>&1; then
+                if chronyd -p -f /etc/chrony/chrony.conf >/dev/null 2>&1; then
                     echo -e "${GREEN}配置文件语法正确${NC}"
                 else
-                    echo -e "${YELLOW}警告：配置文件语法验证失败，请检查配置${NC}"
+                    echo -e "${YELLOW}提示：配置文件静态语法验证未通过或当前 chronyd 不支持 -p 参数。${NC}"
+                    echo -e "${YELLOW}将继续启动服务，并以 systemctl/chronyc 实际运行状态作为最终验证结果。${NC}"
                 fi
                 
                 # 启用并启动服务
                 systemctl enable chronyd >/dev/null 2>&1
                 systemctl restart chronyd
-                
-                echo -e "${GREEN}NTP服务已配置并启动${NC}"
+
+                sleep 2
+                # 尝试立即同步
+                chronyc -a makestep >/dev/null 2>&1
+
+                if systemctl is-active --quiet chronyd 2>/dev/null; then
+                    echo -e "${GREEN}NTP服务已配置并启动${NC}"
+                    if chronyc tracking >/dev/null 2>&1; then
+                        echo -e "${GREEN}chrony运行状态验证通过${NC}"
+                    else
+                        echo -e "${YELLOW}NTP服务已启动，但 chronyc 暂时无法获取同步状态，请稍后在菜单[5]查看。${NC}"
+                    fi
+                else
+                    echo -e "${RED}NTP服务启动失败，请查看：systemctl status chronyd${NC}"
+                fi
                 echo -e "${GREEN}同步策略：偏差超过1秒立即校正${NC}"
                 echo -e "${GREEN}轮询间隔：minpoll 3 (8秒), maxpoll 6 (64秒)${NC}"
                 echo -e "${CYAN}已选择的服务器：${NC}"
                 for s in "${servers[@]}"; do
                     echo -e "  ${GREEN}✓${NC} $s"
                 done
-                
-                sleep 2
-                # 尝试立即同步
-                chronyc -a makestep >/dev/null 2>&1
                 
                 echo -e "${GREEN}当前时间: $(date '+%Y-%m-%d %H:%M:%S %Z')${NC}"
                 read -rp "按回车键继续..." _

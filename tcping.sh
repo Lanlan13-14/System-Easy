@@ -17,12 +17,13 @@ ipver=""
 sent=0
 ok=0
 fail=0
-seq=0
+seq=1
 min_us=-1
 max_us=0
 sum_us=0
 rtts_us=()
 resolved=""
+run_start_us=0
 
 die() {
     printf 'tcping: %s\n' "$*" >&2
@@ -85,14 +86,23 @@ now_us() {
 }
 
 fmt_ms() {
-    local us=${1:-0} sign="" whole frac2 rem
+    local us=${1:-0} sign="" whole frac3 rem
     if (( us < 0 )); then sign="-"; us=$((-us)); fi
-    # round to nearest 0.01 ms = 10 us
-    us=$((us + 5))
+    # Preserve microsecond-derived precision: 0.001 ms = 1 us.
     whole=$((us / 1000))
     rem=$((us % 1000))
-    frac2=$((rem / 10))
-    printf '%s%d.%02d' "$sign" "$whole" "$frac2"
+    frac3=$rem
+    printf '%s%d.%03d' "$sign" "$whole" "$frac3"
+}
+
+fmt_ping_ms() {
+    local us=${1:-0} sign="" whole frac1
+    if (( us < 0 )); then sign="-"; us=$((-us)); fi
+    # Ping-style per-probe display: one decimal millisecond, rounded.
+    us=$((us + 50))
+    whole=$((us / 1000))
+    frac1=$(((us % 1000) / 100))
+    printf '%s%d.%d' "$sign" "$whole" "$frac1"
 }
 
 percent_loss() {
@@ -208,18 +218,21 @@ sleep_interval() {
 
 probe_once() {
     local host=$1 prt=$2 timeout_s=$3 start end pid rc rfd wfd delay
-    start=$(now_us)
     printf -v delay '%d.%06d' "$((timeout_s / 1000000))" "$((timeout_s % 1000000))"
 
-    # Run the connector as a coprocess.  It writes its own completion timestamp,
-    # so the reported RTT does not include parent-side polling jitter.
+    # Run the connector as a coprocess.  It captures start and end inside the
+    # same child process, bracketing only the TCP connect syscall path and
+    # avoiding parent scheduling / pipe-read jitter in the RTT value.
     coproc TCPING_CONNECT {
+        local child_start child_end
+        child_start=$(now_us)
         if exec 3<>"/dev/tcp/$host/$prt"; then
-            printf '0 %s\n' "$(now_us)"
+            child_end=$(now_us)
+            printf '0 %s\n' "$((child_end - child_start))"
             exec 3<&-
             exec 3>&-
         else
-            printf '1 %s\n' "$(now_us)"
+            printf '1 0\n'
         fi
     } 2>/dev/null
     pid=$TCPING_CONNECT_PID
@@ -231,8 +244,7 @@ probe_once() {
         wait "$pid" 2>/dev/null || true
         exec {rfd}<&-
         if [[ $rc == 0 && $end =~ ^[0-9]+$ ]]; then
-            probe_rtt_us=$((end - start))
-            (( probe_rtt_us < 0 )) && probe_rtt_us=0
+            probe_rtt_us=$end
             return 0
         fi
         return 1
@@ -254,8 +266,12 @@ update_stats() {
 }
 
 print_stats() {
-    local avg_us=0 mdev_us=0 abs_sum=0 val diff line_fail
+    local avg_us=0 mdev_us=0 abs_sum=0 val diff line_fail total_ms=0 now
     line_fail=$((sent - ok))
+    if (( run_start_us > 0 )); then
+        now=$(now_us)
+        total_ms=$(((now - run_start_us + 500) / 1000))
+    fi
     if (( ok > 0 )); then
         avg_us=$(((sum_us + ok / 2) / ok))
         for val in "${rtts_us[@]}"; do
@@ -268,14 +284,14 @@ print_stats() {
         max_us=0
     fi
 
-    printf -- '--- %s:%s tcping statistics ---\n' "$resolved" "$port"
-    printf '%d probes, %d success, %d failed (%s%% loss)\n' "$sent" "$ok" "$line_fail" "$(percent_loss "$line_fail" "$sent")"
-    printf 'round-trip min/avg/max/mdev = %s/%s/%s/%s ms\n' \
+    (( quiet == 0 )) && printf '\n'
+    printf -- '--- %s tcping statistics ---\n' "$resolved"
+    printf '%d probes transmitted, %d connected, %s%% loss, time %dms\n' "$sent" "$ok" "$(percent_loss "$line_fail" "$sent")" "$total_ms"
+    printf 'tcp connect min/avg/max/mdev = %s/%s/%s/%s ms\n' \
         "$(fmt_ms "$min_us")" "$(fmt_ms "$avg_us")" "$(fmt_ms "$max_us")" "$(fmt_ms "$mdev_us")"
 }
 
 finish() {
-    printf '\n' >&2
     print_stats
     exit 130
 }
@@ -337,16 +353,17 @@ fi
 
 trap finish INT TERM
 
-((quiet == 0)) && printf 'tcping %s:%s\n' "$resolved" "$port"
+run_start_us=$(now_us)
+((quiet == 0)) && printf 'TCPING %s (%s) port %s\n' "$dest" "$resolved" "$port"
 
 while :; do
     ((sent++))
     probe_rtt_us=0
     if probe_once "$resolved" "$port" "$timeout_us"; then
         update_stats "$probe_rtt_us"
-        ((quiet == 0)) && printf 'connected to %s:%s, seq=%d time=%s ms\n' "$resolved" "$port" "$seq" "$(fmt_ms "$probe_rtt_us")"
+        ((quiet == 0)) && printf 'Connected to %s:%s: tcp_seq=%d time=%s ms\n' "$resolved" "$port" "$seq" "$(fmt_ping_ms "$probe_rtt_us")"
     else
-        ((quiet == 0)) && printf 'no response from %s:%s, seq=%d\n' "$resolved" "$port" "$seq"
+        ((quiet == 0)) && printf 'No response from %s:%s: tcp_seq=%d\n' "$resolved" "$port" "$seq"
     fi
 
     ((seq++))

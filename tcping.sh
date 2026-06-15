@@ -280,6 +280,7 @@ finish() {
     exit 130
 }
 
+dest=""
 while (($#)); do
     case $1 in
         -c)
@@ -305,17 +306,24 @@ while (($#)); do
         -h|--help)
             usage ;;
         --)
-            shift; break ;;
+            shift
+            while (($#)); do
+                [[ -z $dest ]] || die "unexpected argument: $1"
+                dest=$1
+                shift
+            done ;;
         -*)
             die "unknown option: $1" ;;
         *)
-            break ;;
+            [[ -z $dest ]] || die "unexpected argument: $1"
+            dest=$1
+            shift ;;
     esac
 done
 
-(($# == 1)) || usage
+[[ -n $dest ]] || usage
 
-dest=$(strip_host_brackets "$1")
+dest=$(strip_host_brackets "$dest")
 [[ -n $dest ]] || usage
 
 validate_args

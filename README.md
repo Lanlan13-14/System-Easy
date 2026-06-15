@@ -31,38 +31,38 @@ curl -fsSL https://raw.githubusercontent.com/Lanlan13-14/System-Easy/refs/heads/
 ##### 卸载选项在脚本中已提供
 #### 仅TCPING（Debian/Ubuntu）
 ```
-sudo apt update && sudo apt install -y bc tcptraceroute && sudo wget -O /usr/bin/tcping https://raw.githubusercontent.com/Lanlan13-14/System-Easy/refs/heads/main/tcping.sh && sudo chmod +x /usr/bin/tcping
+sudo wget -O /usr/bin/tcping https://raw.githubusercontent.com/Lanlan13-14/System-Easy/refs/heads/main/tcping.sh && sudo chmod +x /usr/bin/tcping
 ```
 #### 卸载TCPING（Debian/Ubuntu）
 ```
-sudo rm -f /usr/bin/tcping /usr/bin/tcping.sh && sudo apt remove -y bc tcptraceroute
+sudo rm -f /usr/bin/tcping /usr/bin/tcping.sh
 ```
 #### 仅TCPING（Red Hat 系）
 
 ```bash
 # RHEL/CentOS 7/8/9 及衍生版本
-sudo yum install -y epel-release && sudo yum install -y bc tcptraceroute && sudo curl -o /usr/bin/tcping https://raw.githubusercontent.com/Lanlan13-14/System-Easy/refs/heads/main/tcping.sh && sudo chmod +x /usr/bin/tcping
+sudo curl -fsSL -o /usr/bin/tcping https://raw.githubusercontent.com/Lanlan13-14/System-Easy/refs/heads/main/tcping.sh && sudo chmod +x /usr/bin/tcping
 ```
 
 ###### 或者使用 dnf（RHEL 8+ / Fedora）：
 
 ```bash
 # RHEL 8/9, Rocky Linux, AlmaLinux, Fedora
-sudo dnf install -y epel-release && sudo dnf install -y bc tcptraceroute && sudo curl -o /usr/bin/tcping https://raw.githubusercontent.com/Lanlan13-14/System-Easy/refs/heads/main/tcping.sh && sudo chmod +x /usr/bin/tcping
+sudo curl -fsSL -o /usr/bin/tcping https://raw.githubusercontent.com/Lanlan13-14/System-Easy/refs/heads/main/tcping.sh && sudo chmod +x /usr/bin/tcping
 ```
 
 #### 卸载TCPING（Red Hat 系）
 
 ```bash
 # RHEL/CentOS 7/8/9 及衍生版本
-sudo rm -f /usr/bin/tcping && sudo yum remove -y bc tcptraceroute
+sudo rm -f /usr/bin/tcping
 ```
 
 ###### 使用 dnf 卸载：
 
 ```bash
 # RHEL 8/9, Rocky Linux, AlmaLinux, Fedora
-sudo rm -f /usr/bin/tcping && sudo dnf remove -y bc tcptraceroute
+sudo rm -f /usr/bin/tcping
 ```
 #### 安装Kuma-ping
 ```

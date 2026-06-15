@@ -2073,11 +2073,13 @@ EOF
 install_network_tools() {
     clear
     echo "========== 安装网络排查工具 =========="
-    echo "包含：TCPing、tcptraceroute、MTR、NextTrace、Speedtest、iperf3"
-    ensure_command tcptraceroute tcptraceroute
-    ensure_command bc
-    # tcping
-    wget -q --show-progress "$(github_raw_url tcping.sh)" -O /usr/bin/tcping && chmod +x /usr/bin/tcping
+    echo "包含：TCPing、MTR、NextTrace、Speedtest、iperf3"
+    # tcping：自研单文件实现，无需 bc/tcptraceroute/nc 等额外依赖
+    if command -v wget >/dev/null 2>&1; then
+        wget -q --show-progress "$(github_raw_url tcping.sh)" -O /usr/bin/tcping && chmod +x /usr/bin/tcping
+    else
+        curl -fsSL "$(github_raw_url tcping.sh)" -o /usr/bin/tcping && chmod +x /usr/bin/tcping
+    fi
     # mtr
     ensure_command mtr mtr-tiny
     # nexttrace

@@ -96,13 +96,7 @@ fmt_ms() {
 }
 
 fmt_ping_ms() {
-    local us=${1:-0} sign="" whole frac1
-    if (( us < 0 )); then sign="-"; us=$((-us)); fi
-    # Ping-style per-probe display: one decimal millisecond, rounded.
-    us=$((us + 50))
-    whole=$((us / 1000))
-    frac1=$(((us % 1000) / 100))
-    printf '%s%d.%d' "$sign" "$whole" "$frac1"
+    fmt_ms "$1"
 }
 
 percent_loss() {

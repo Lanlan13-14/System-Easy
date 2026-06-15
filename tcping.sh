@@ -187,48 +187,61 @@ validate_args() {
 }
 
 sleep_interval() {
-    local us=${1:-0} sec frac
+    local us=${1:-0} sec frac delay rfd wfd cpid _unused
     (( us <= 0 )) && return 0
     sec=$((us / 1000000))
     frac=$((us % 1000000))
-    # Bash read -t is a builtin and avoids depending on external sleep.
-    IFS= read -r -t "${sec}.$(printf '%06d' "$frac")" _unused || true
+    printf -v delay '%d.%06d' "$sec" "$frac"
+
+    # Use a private coprocess as the wait target so interactive stdin is never
+    # consumed while tcping is sleeping between probes.
+    coproc TCPING_DELAY { IFS= read -r _unused; }
+    cpid=$TCPING_DELAY_PID
+    rfd=${TCPING_DELAY[0]}
+    wfd=${TCPING_DELAY[1]}
+    IFS= read -r -t "$delay" -u "$rfd" _unused || true
+    kill "$cpid" 2>/dev/null || true
+    wait "$cpid" 2>/dev/null || true
+    exec {rfd}<&-
+    exec {wfd}>&-
 }
 
 probe_once() {
-    local host=$1 prt=$2 timeout_s=$3 start end pid rc
+    local host=$1 prt=$2 timeout_s=$3 start end pid rc rfd wfd delay
     start=$(now_us)
+    printf -v delay '%d.%06d' "$((timeout_s / 1000000))" "$((timeout_s % 1000000))"
 
-    # Run the connector in background so we can enforce our own timeout.
-    (
-        exec 3<>"/dev/tcp/$host/$prt" || exit 1
-        exec 3<&-
-        exec 3>&-
-        exit 0
-    ) >/dev/null 2>&1 &
-    pid=$!
-
-    while kill -0 "$pid" 2>/dev/null; do
-        if (( $(now_us) - start >= timeout_s )); then
-            kill "$pid" 2>/dev/null || true
-            wait "$pid" 2>/dev/null || true
-            return 124
+    # Run the connector as a coprocess.  It writes its own completion timestamp,
+    # so the reported RTT does not include parent-side polling jitter.
+    coproc TCPING_CONNECT {
+        if exec 3<>"/dev/tcp/$host/$prt"; then
+            printf '0 %s\n' "$(now_us)"
+            exec 3<&-
+            exec 3>&-
+        else
+            printf '1 %s\n' "$(now_us)"
         fi
-        # Poll in short builtin waits.  5 ms keeps timeout overshoot small
-        # without burning CPU.
-        IFS= read -r -t 0.005 _unused || true
-    done
+    } 2>/dev/null
+    pid=$TCPING_CONNECT_PID
+    rfd=${TCPING_CONNECT[0]}
+    wfd=${TCPING_CONNECT[1]}
+    exec {wfd}>&-
 
-    wait "$pid" 2>/dev/null
-    rc=$?
-    end=$(now_us)
-
-    if (( rc == 0 )); then
-        probe_rtt_us=$((end - start))
-        return 0
+    if IFS=' ' read -r -t "$delay" -u "$rfd" rc end; then
+        wait "$pid" 2>/dev/null || true
+        exec {rfd}<&-
+        if [[ $rc == 0 && $end =~ ^[0-9]+$ ]]; then
+            probe_rtt_us=$((end - start))
+            (( probe_rtt_us < 0 )) && probe_rtt_us=0
+            return 0
+        fi
+        return 1
     fi
 
-    return 1
+    kill "$pid" 2>/dev/null || true
+    wait "$pid" 2>/dev/null || true
+    exec {rfd}<&-
+    return 124
 }
 
 update_stats() {

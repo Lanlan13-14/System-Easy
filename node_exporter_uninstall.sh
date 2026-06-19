@@ -14,7 +14,7 @@ has() { command -v "$1" >/dev/null 2>&1; }
 [[ ${EUID:-$(id -u)} -eq 0 ]] || fail "This script must be run as root (use sudo)"
 
 REMOVE_NGINX=0
-for arg in "${@:-}"; do
+for arg in "$@"; do
   case "$arg" in
     --help|-h)
       cat <<USAGE
